@@ -300,5 +300,21 @@
       "kyberDmmV2": "0xc550441c6F8800aC74dd26372AB907908b4f51D9"
     },
     "lendingContracts": {}
+  },
+  "sonic_mainnet": {
+    "smartWalletImplementation": "0xeC04bAb6F0Fa7068a2eCD17EC70AA99b09e814b8",
+    "smartWalletProxy": "0x6EE8626EC13Acb0E9208CBFc45176964dfaD06ea",
+    "swapContracts": {
+      "kyberSwapV3": "0x294b02df529B24d9EC88DC076000276Bee7b1783"
+    },
+    "lendingContracts": {}
+  },
+  "sonic_testnet": {
+    "smartWalletImplementation": "0x7585De6Ea5880e04670FdcC36911c314f050b0Ac",
+    "smartWalletProxy": "0x89D40Db191Bbe49a261F379eFd2ec1acD728CadB",
+    "swapContracts": {
+      "kyberSwapV3": "0x94AdF501cD460b113D66B0c27c416B5F3ea5e60A"
+    },
+    "lendingContracts": {}
   }
 }

@@ -32,6 +32,7 @@ const {
   MAINNET_FORK_BLOCK,
   LINEASCAN_KEY,
   BASESCAN_KEY,
+  SONICSCAN_KEY,
 } = process.env;
 
 // custom network config for testing. See scripts/config.ts
@@ -135,6 +136,8 @@ const config: HardhatUserConfig = {
       linea: LINEASCAN_KEY as string,
 
       base: BASESCAN_KEY as string,
+
+      sonic: SONICSCAN_KEY as string,
     },
     customChains: [
       {
@@ -159,6 +162,14 @@ const config: HardhatUserConfig = {
         urls: {
           apiURL: 'https://api.basescan.org/api',
           browserURL: 'https://api.basescan.org',
+        },
+      },
+      {
+        network: 'sonic',
+        chainId: 146,
+        urls: {
+          apiURL: 'https://api.sonicscan.org/api',
+          browserURL: 'https://sonicscan.org',
         },
       },
     ],
@@ -339,6 +350,22 @@ if (PRIVATE_KEY) {
     timeout: 60000,
     gasPrice: 0.0025 * 1e9,
   };
+
+  config.networks!.sonic_testnet = {
+    url: 'https://rpc.blaze.soniclabs.com',
+    chainId: 57054,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 13 * 1e9,
+  };
+
+  config.networks!.sonic_mainnet = {
+    url: 'https://sonic-rpc.publicnode.com:443',
+    chainId: 146,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 70 * 1e9,
+  };
 }
 
 if (PRIVATE_KEY && INFURA_API_KEY) {
@@ -395,6 +422,22 @@ if (PRIVATE_KEY && INFURA_API_KEY) {
     accounts: [PRIVATE_KEY],
     timeout: 20000,
     gasPrice: 13 * 1e9,
+  };
+
+  config.networks!.sonic_testnet = {
+    url: 'https://rpc.blaze.soniclabs.com',
+    chainId: 57054,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 13 * 1e9,
+  };
+
+  config.networks!.sonic_mainnet = {
+    url: 'https://sonic-rpc.publicnode.com:443',
+    chainId: 146,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 70 * 1e9,
   };
 }
 
