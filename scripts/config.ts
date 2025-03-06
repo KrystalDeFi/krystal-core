@@ -13,6 +13,7 @@ import {OptimismConfig} from './config_optimism';
 import {LineaConfig} from './config_linea';
 import {BaseConfig} from './config_base';
 import {SonicConfig} from './config_sonic';
+import {BerachainConfig} from './config_berachain';
 
 const NetworkConfig: Record<string, IConfig> = {
   ...BscConfig,
@@ -28,6 +29,7 @@ const NetworkConfig: Record<string, IConfig> = {
   ...LineaConfig,
   ...BaseConfig,
   ...SonicConfig,
+  ...BerachainConfig,
 };
 
 NetworkConfig.hardhat = {
