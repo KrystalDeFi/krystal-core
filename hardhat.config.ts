@@ -33,6 +33,7 @@ const {
   LINEASCAN_KEY,
   BASESCAN_KEY,
   SONICSCAN_KEY,
+  BERASCAN_KEY,
 } = process.env;
 
 // custom network config for testing. See scripts/config.ts
@@ -138,6 +139,8 @@ const config: HardhatUserConfig = {
       base: BASESCAN_KEY as string,
 
       sonic: SONICSCAN_KEY as string,
+
+      berachain: BERASCAN_KEY as string,
     },
     customChains: [
       {
@@ -170,6 +173,14 @@ const config: HardhatUserConfig = {
         urls: {
           apiURL: 'https://api.sonicscan.org/api',
           browserURL: 'https://sonicscan.org',
+        },
+      },
+      {
+        network: 'berachain',
+        chainId: 80094,
+        urls: {
+          apiURL: 'https://api.berascan.com/api',
+          browserURL: 'https://berascan.com',
         },
       },
     ],
@@ -366,6 +377,14 @@ if (PRIVATE_KEY) {
     timeout: 20000,
     gasPrice: 70 * 1e9,
   };
+
+  config.networks!.berachain_mainnet = {
+    url: 'https://rpc.berachain.com',
+    chainId: 80094,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 70 * 1e9,
+  };
 }
 
 if (PRIVATE_KEY && INFURA_API_KEY) {
@@ -435,6 +454,13 @@ if (PRIVATE_KEY && INFURA_API_KEY) {
   config.networks!.sonic_mainnet = {
     url: 'https://sonic-rpc.publicnode.com:443',
     chainId: 146,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 70 * 1e9,
+  };
+  config.networks!.berachain_mainnet = {
+    url: 'https://rpc.berachain.com',
+    chainId: 80094,
     accounts: [PRIVATE_KEY],
     timeout: 20000,
     gasPrice: 70 * 1e9,

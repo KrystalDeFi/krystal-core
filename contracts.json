@@ -72,6 +72,14 @@
     },
     "lendingContracts": {}
   },
+  "berachain_mainnet": {
+    "smartWalletImplementation": "0x6795A3b0d755946B29c45631d76d63EF6683DbDE",
+    "smartWalletProxy": "0xB9B207A77c84556eb6e02D2C0E7873BcF4E9c8d5",
+    "swapContracts": {
+      "kyberSwapV3": "0x99b4Dcc3a6fe2EEE7DccB932248916A533bE0989"
+    },
+    "lendingContracts": {}
+  },
   "bsc_mainnet": {
     "smartWalletImplementation": "0x3de69846092D21088F25959e941d621eE95F36eD",
     "smartWalletProxy": "0x051DC16b2ECB366984d1074dCC07c342a9463999",

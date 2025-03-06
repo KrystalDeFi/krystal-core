@@ -20,7 +20,7 @@ while getopts ":hc:n:f:x:" option; do
       exit
       ;;
     c) 
-      if [[ ! "$OPTARG" =~ ^(eth|bsc|polygon|avalanche|fantom|cronos|aurora|arbitrum|klaytn|optimism|linea|base|sonic)$ ]]; then
+      if [[ ! "$OPTARG" =~ ^(eth|bsc|polygon|avalanche|fantom|cronos|aurora|arbitrum|klaytn|optimism|linea|base|sonic|berachain)$ ]]; then
           printf "invalid value for -%s\n" "$option" >&2
           echo "$usage" >&2
           exit 1
