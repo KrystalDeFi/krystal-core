@@ -313,6 +313,7 @@
     "smartWalletImplementation": "0xeC04bAb6F0Fa7068a2eCD17EC70AA99b09e814b8",
     "smartWalletProxy": "0x6EE8626EC13Acb0E9208CBFc45176964dfaD06ea",
     "swapContracts": {
+      "okx": "0x15D939141Bae45Fa2a3152A0D1d5BFDB60485A3A",
       "kyberSwapV3": "0x294b02df529B24d9EC88DC076000276Bee7b1783"
     },
     "lendingContracts": {}

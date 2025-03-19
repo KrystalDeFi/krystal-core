@@ -10,6 +10,10 @@ export const SonicConfig: Record<string, IConfig> = {
     kyberSwapV3: {
       router: '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5',
     },
+    okx: {
+      router: '0x4Efa4b8545a3a77D80Da3ECC8F81EdB1a4bda783',
+      okxTokenApprove: '0xd321ab5589d3e8fa5df985ccfef625022e2dd910',
+    },
 
     supportedWallets: commonPlatformWallets,
     nativeUsdRate: 3385,
