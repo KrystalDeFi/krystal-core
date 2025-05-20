@@ -135,6 +135,7 @@ const config: HardhatUserConfig = {
       linea: LINEASCAN_KEY as string,
 
       base: BASESCAN_KEY as string,
+      ronin: 'x',
     },
     customChains: [
       {
@@ -159,6 +160,14 @@ const config: HardhatUserConfig = {
         urls: {
           apiURL: 'https://api.basescan.org/api',
           browserURL: 'https://api.basescan.org',
+        },
+      },
+      {
+        network: 'ronin',
+        chainId: 2020,
+        urls: {
+          apiURL: 'https://explorer.roninchain.com/api',
+          browserURL: 'https://explorer.roninchain.com/',
         },
       },
     ],
@@ -395,6 +404,14 @@ if (PRIVATE_KEY && INFURA_API_KEY) {
     accounts: [PRIVATE_KEY],
     timeout: 20000,
     gasPrice: 13 * 1e9,
+  };
+
+  config.networks!.ronin_mainnet = {
+    url: `https://api.roninchain.com/rpc`,
+    chainId: 2020,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 21 * 1e9,
   };
 }
 

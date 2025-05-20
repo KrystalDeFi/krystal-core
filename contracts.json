@@ -300,5 +300,13 @@
       "kyberDmmV2": "0xc550441c6F8800aC74dd26372AB907908b4f51D9"
     },
     "lendingContracts": {}
+  },
+  "ronin_mainnet": {
+    "smartWalletImplementation": "0xdDecC5735eC2b65C0b110d1DEdFCC90877ef8177",
+    "smartWalletProxy": "0xfEE93FCD1a26e858325613818dE5C533d94A33b6",
+    "swapContracts": {
+      "kyberSwapV3": "0x0f9332D3bAfdbaAa5be753819356497B8dEfe123"
+    },
+    "lendingContracts": {}
   }
 }
