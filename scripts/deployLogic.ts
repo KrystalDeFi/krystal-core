@@ -168,8 +168,6 @@ export const deploy = async (
   return deployedContracts;
 };
 
-deploy.dependencies = ['VerifyContracts'];
-
 async function deployContracts(
   existingContract: Record<string, any> | undefined = undefined,
   contractAdmin: string

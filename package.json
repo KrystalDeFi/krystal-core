@@ -39,7 +39,6 @@
     "@uniswap/v3-periphery": "^1.1.0",
     "axios": "^0.21.4",
     "dotenv": "^10.0.0",
-    "hardhat-deploy": "^1.0.2",
     "solc": "0.7.6"
   },
   "devDependencies": {
