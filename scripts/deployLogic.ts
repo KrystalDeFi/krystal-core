@@ -492,22 +492,22 @@ async function deployContract(
   }
 
   // Only verify new contract to save time
-  // if (autoVerify && !contractAddress) {
-  // if (autoVerify) {
-  try {
-    log(3, '>> sleep first, wait for contract data to be propagated');
-    await sleep(5000);
-    log(3, '>> start verifying');
-    await run('verify:verify', {
-      address: contract.address,
-      constructorArguments: args,
-      contract: contractLocation,
-    });
-    log(3, '>> done verifying');
-  } catch (e) {
-    log(2, 'failed to verify contract', e);
+  if (autoVerify && !contractAddress) {
+    // if (autoVerify) {
+    try {
+      log(3, '>> sleep first, wait for contract data to be propagated');
+      await sleep(5000);
+      log(3, '>> start verifying');
+      await run('verify:verify', {
+        address: contract.address,
+        constructorArguments: args,
+        contract: contractLocation,
+      });
+      log(3, '>> done verifying');
+    } catch (e) {
+      log(2, 'failed to verify contract', e);
+    }
   }
-  // }
 
   return contract;
 }
