@@ -14,6 +14,7 @@ import {LineaConfig} from './config_linea';
 import {BaseConfig} from './config_base';
 import {SonicConfig} from './config_sonic';
 import {BerachainConfig} from './config_berachain';
+import {UnichainConfig} from './config_unichain';
 
 const NetworkConfig: Record<string, IConfig> = {
   ...BscConfig,
@@ -30,6 +31,7 @@ const NetworkConfig: Record<string, IConfig> = {
   ...BaseConfig,
   ...SonicConfig,
   ...BerachainConfig,
+  ...UnichainConfig,
 };
 
 NetworkConfig.hardhat = {

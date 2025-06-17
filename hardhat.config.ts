@@ -34,6 +34,7 @@ const {
   BASESCAN_KEY,
   SONICSCAN_KEY,
   BERASCAN_KEY,
+  UNISCAN_KEY,
 } = process.env;
 
 // custom network config for testing. See scripts/config.ts
@@ -141,6 +142,7 @@ const config: HardhatUserConfig = {
       sonic: SONICSCAN_KEY as string,
 
       berachain: BERASCAN_KEY as string,
+      unichain: UNISCAN_KEY as string,
     },
     customChains: [
       {
@@ -181,6 +183,14 @@ const config: HardhatUserConfig = {
         urls: {
           apiURL: 'https://api.berascan.com/api',
           browserURL: 'https://berascan.com',
+        },
+      },
+      {
+        network: 'unichain',
+        chainId: 130,
+        urls: {
+          apiURL: 'https://api.uniscan.xyz/api',
+          browserURL: 'https://uniscan.xyz',
         },
       },
     ],
@@ -376,6 +386,14 @@ if (PRIVATE_KEY) {
     accounts: [PRIVATE_KEY],
     timeout: 20000,
     gasPrice: 70 * 1e9,
+  };
+
+  config.networks!.unichain_mainnet = {
+    url: 'https://unichain-rpc.publicnode.com',
+    chainId: 130,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 1100,
   };
 
   config.networks!.berachain_mainnet = {

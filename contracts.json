@@ -325,5 +325,17 @@
       "kyberSwapV3": "0x94AdF501cD460b113D66B0c27c416B5F3ea5e60A"
     },
     "lendingContracts": {}
+  },
+  "unichain_mainnet": {
+    "smartWalletImplementation": "0xdDecC5735eC2b65C0b110d1DEdFCC90877ef8177",
+    "smartWalletProxy": "0x9AF1B56Acb3F0Af84Be68cE1A5284ACc0615faDD",
+    "swapContracts": {
+      "uniSwap": "0x0f9332D3bAfdbaAa5be753819356497B8dEfe123",
+      "uniSwapV3": "0xfEE93FCD1a26e858325613818dE5C533d94A33b6",
+      "uniSwapV3Bsc": "0xb945cB8eeC8530450d39cCDB62D9587992f684Fd",
+      "okx": "0x30d97CD9B14926222b3eE73E2D8706c3C2c37739",
+      "kyberSwapV3": "0xFaACD9f7E68Bb36c1029Ab87D1d7325919e67cc0"
+    },
+    "lendingContracts": {}
   }
 }
