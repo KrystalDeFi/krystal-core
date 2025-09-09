@@ -16,27 +16,7 @@ dotenv.config();
 // Network specific config
 dotenv.config({path: `${__dirname}/./env/.env.${process.env.CHAIN}.${process.env.NETWORK}`});
 
-const {
-  PRIVATE_KEY,
-  INFURA_API_KEY,
-  ETHERSCAN_KEY,
-  BSCSCAN_KEY,
-  AVAXSCAN_KEY,
-  POLYGONSCAN_KEY,
-  FANTOMSCAN_KEY,
-  AURORASCAN_KEY,
-  ARBISCAN_KEY,
-  OPTIMISTICSCAN_KEY,
-  MAINNET_ID,
-  MAINNET_FORK,
-  MAINNET_FORK_BLOCK,
-  LINEASCAN_KEY,
-  BASESCAN_KEY,
-  SONICSCAN_KEY,
-  BERASCAN_KEY,
-  UNISCAN_KEY,
-  HYPEREVMSCAN_KEY,
-} = process.env;
+const {PRIVATE_KEY, INFURA_API_KEY, ETHERSCAN_KEY, MAINNET_ID, MAINNET_FORK, MAINNET_FORK_BLOCK} = process.env;
 
 // custom network config for testing. See scripts/config.ts
 export const customNetworkConfig =
