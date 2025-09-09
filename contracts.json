@@ -204,6 +204,15 @@
     },
     "lendingContracts": {}
   },
+  "hyperevm_mainnet": {
+    "smartWalletImplementation": "0xb821F0b2f4C19351F225CE2A00E7e411a44c32e1",
+    "smartWalletProxy": "0x14b37a44067c877F46aCE21d42ccEC4e9593A941",
+    "swapContracts": {
+      "uniSwapV3": "0x87b564188aC87b9C3f6f502C8a35262EcD2dFCB8",
+      "kyberSwapV3": "0x1AF3f25F8AE268680Bb8351a8457bBfD63514e11"
+    },
+    "lendingContracts": {}
+  },
   "klaytn_mainnet": {
     "smartWalletImplementation": "0xb3f1ffe07f77a9b123503e54e6808330c0bf77b9",
     "smartWalletProxy": "0x864F01c5E46b0712643B956BcA607bF883e0dbC5",

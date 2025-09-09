@@ -35,6 +35,7 @@ const {
   SONICSCAN_KEY,
   BERASCAN_KEY,
   UNISCAN_KEY,
+  HYPEREVMSCAN_KEY,
 } = process.env;
 
 // custom network config for testing. See scripts/config.ts
@@ -100,50 +101,8 @@ const config: HardhatUserConfig = {
   etherscan: {
     // Your API key for bscscan / ethscan
     // Obtain one at https://bscscan.io/
-    apiKey: {
-      mainnet: ETHERSCAN_KEY as string,
-      ropsten: ETHERSCAN_KEY as string,
-      goerli: ETHERSCAN_KEY as string,
-      rinkeby: ETHERSCAN_KEY as string,
+    apiKey: ETHERSCAN_KEY as string,
 
-      // binance smart chain
-      bsc: BSCSCAN_KEY as string,
-      bscTestnet: BSCSCAN_KEY as string,
-
-      // fantom mainnet
-      opera: FANTOMSCAN_KEY as string,
-      ftmTestnet: FANTOMSCAN_KEY as string,
-
-      // polygon
-      polygon: POLYGONSCAN_KEY as string,
-      polygonMumbai: POLYGONSCAN_KEY as string,
-
-      // avalanche
-      avalanche: AVAXSCAN_KEY as string,
-      avalancheFujiTestnet: AVAXSCAN_KEY as string,
-
-      // aurora
-      aurora: AURORASCAN_KEY as string,
-      auroraTestnet: AURORASCAN_KEY as string,
-
-      // arbitrum
-      arbitrumOne: ARBISCAN_KEY as string,
-      arbitrumTestnet: ARBISCAN_KEY as string,
-
-      // optimism
-      optimisticEthereum: OPTIMISTICSCAN_KEY as string,
-
-      // linea
-      // lineaGoerli: 'YourApiKeyToken',
-      linea: LINEASCAN_KEY as string,
-
-      base: BASESCAN_KEY as string,
-
-      sonic: SONICSCAN_KEY as string,
-
-      berachain: BERASCAN_KEY as string,
-      unichain: UNISCAN_KEY as string,
-    },
     customChains: [
       {
         network: 'lineaGoerli',
@@ -191,6 +150,22 @@ const config: HardhatUserConfig = {
         urls: {
           apiURL: 'https://api.uniscan.xyz/api',
           browserURL: 'https://uniscan.xyz',
+        },
+      },
+      {
+        network: 'hyperevm',
+        chainId: 999,
+        urls: {
+          apiURL: 'https://api.etherscan.io/v2/api',
+          browserURL: 'https://hyperevmscan.io',
+        },
+      },
+      {
+        network: 'hyperevmTestnet',
+        chainId: 998,
+        urls: {
+          apiURL: 'https://api.etherscan.io/v2/api',
+          browserURL: 'https://testnet.hyperevmscan.io',
         },
       },
     ],
@@ -403,6 +378,22 @@ if (PRIVATE_KEY) {
     timeout: 20000,
     gasPrice: 70 * 1e9,
   };
+
+  config.networks!.hyperevm_mainnet = {
+    url: 'https://rpc.hyperliquid.xyz/evm',
+    chainId: 999,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 0.1 * 1e9,
+  };
+
+  config.networks!.hyperevm_testnet = {
+    url: 'https://rpc.hyperliquid-testnet.xyz/evm',
+    chainId: 998,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 0.2 * 1e9,
+  };
 }
 
 if (PRIVATE_KEY && INFURA_API_KEY) {
@@ -482,6 +473,21 @@ if (PRIVATE_KEY && INFURA_API_KEY) {
     accounts: [PRIVATE_KEY],
     timeout: 20000,
     gasPrice: 70 * 1e9,
+  };
+  config.networks!.hyperevm_mainnet = {
+    url: 'https://rpc.hyperliquid.xyz/evm',
+    chainId: 999,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 1 * 1e9,
+  };
+
+  config.networks!.hyperevm_testnet = {
+    url: 'https://rpc.hyperliquid-testnet.xyz/evm',
+    chainId: 998,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 1 * 1e9,
   };
 }
 
