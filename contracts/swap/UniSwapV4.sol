@@ -1,0 +1,701 @@
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity 0.7.6;
+pragma experimental ABIEncoderV2;
+
+import "./BaseSwap.sol";
+import "../libraries/BytesLib.sol";
+import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/Address.sol";
+import "@openzeppelin/contracts/utils/EnumerableSet.sol";
+import "@kyber.network/utils-sc/contracts/IERC20Ext.sol";
+import "@uniswap/v3-core/contracts/libraries/BitMath.sol";
+import "@uniswap/v3-core/contracts/libraries/TickMath.sol";
+import "@uniswap/v3-core/contracts/libraries/SwapMath.sol";
+import "@uniswap/v3-core/contracts/libraries/LiquidityMath.sol";
+
+/// @dev V4 pool state is stored in a singleton PoolManager, accessed via StateView
+interface IStateView {
+    /// @notice Returns slot0 data for a V4 pool identified by its PoolId (keccak256 of PoolKey)
+    function getSlot0(
+        bytes32 poolId
+    ) external view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee);
+
+    function getLiquidity(bytes32 poolId) external view returns (uint128 liquidity);
+
+    /// @notice Returns the tick bitmap word for the given pool and word position
+    function getTickBitmap(
+        bytes32 poolId,
+        int16 wordPosition
+    ) external view returns (uint256 bitmap);
+
+    /// @notice Returns liquidityGross and liquidityNet for a tick in a V4 pool
+    function getTickLiquidityNet(
+        bytes32 poolId,
+        int24 tick
+    ) external view returns (uint128 liquidityGross, int128 liquidityNet);
+}
+
+/// @dev Minimal Universal Router interface for V4 swaps
+interface IUniversalRouterV4 {
+    /// @param commands Packed bytes of command types
+    /// @param inputs ABI-encoded inputs per command
+    /// @param deadline Deadline timestamp
+    function execute(
+        bytes calldata commands,
+        bytes[] calldata inputs,
+        uint256 deadline
+    ) external payable;
+}
+
+/// @dev PoolKey uniquely identifies a V4 pool; currency0 < currency1 by address ordering
+struct PoolKey {
+    address currency0; // address(0) for native ETH
+    address currency1;
+    uint24 fee;
+    int24 tickSpacing;
+    address hooks; // address(0) if no hooks
+}
+
+/// @dev PathKey describes one hop in a V4 multi-hop path
+struct PathKey {
+    address intermediateCurrency;
+    uint24 fee;
+    int24 tickSpacing;
+    address hooks;
+    bytes hookData;
+}
+
+/// @dev Replicates V3 TickBitmap logic over V4 StateView
+library TickBitmapV4 {
+    function position(int24 tick) private pure returns (int16 wordPos, uint8 bitPos) {
+        wordPos = int16(tick >> 8);
+        bitPos = uint8(tick % 256);
+    }
+
+    function nextInitializedTickWithinOneWord(
+        IStateView stateView,
+        bytes32 poolId,
+        int24 tick,
+        int24 tickSpacing,
+        bool lte
+    ) internal view returns (int24 next, bool initialized) {
+        int24 compressed = tick / tickSpacing;
+        if (tick < 0 && tick % tickSpacing != 0) compressed--;
+
+        if (lte) {
+            (int16 wordPos, uint8 bitPos) = position(compressed);
+            uint256 mask = (1 << bitPos) - 1 + (1 << bitPos);
+            uint256 masked = stateView.getTickBitmap(poolId, wordPos) & mask;
+
+            initialized = masked != 0;
+            next = initialized
+                ? (compressed - int24(bitPos - BitMath.mostSignificantBit(masked))) * tickSpacing
+                : (compressed - int24(bitPos)) * tickSpacing;
+        } else {
+            (int16 wordPos, uint8 bitPos) = position(compressed + 1);
+            uint256 mask = ~((1 << bitPos) - 1);
+            uint256 masked = stateView.getTickBitmap(poolId, wordPos) & mask;
+
+            initialized = masked != 0;
+            next = initialized
+                ? (compressed + 1 + int24(BitMath.leastSignificantBit(masked) - bitPos)) *
+                    tickSpacing
+                : (compressed + 1 + int24(type(uint8).max - bitPos)) * tickSpacing;
+        }
+    }
+}
+
+/// @title UniSwapV4 — Krystal swap adapter for Uniswap V4 and its clones
+/// @notice Supports single-hop and multi-hop exact-input swaps via the V4 Universal Router.
+///         Quote simulation uses V4 StateView so no on-chain Quoter call is needed.
+///
+/// extraArgs encoding (per trade):
+///   [20B] Universal Router address
+///   [20B] StateView address
+///   per hop: [3B] uint24 fee | [3B] uint24 tickSpacing (always positive, cast to int24) | [20B] hooks address
+contract UniSwapV4 is BaseSwap {
+    using SafeERC20 for IERC20Ext;
+    using Address for address;
+    using EnumerableSet for EnumerableSet.AddressSet;
+    using BytesLib for bytes;
+    using SafeCast for uint256;
+    using LowGasSafeMath for uint256;
+    using LowGasSafeMath for int256;
+    using TickBitmapV4 for IStateView;
+
+    // ── Universal Router command byte for V4 swaps ──────────────────────────
+    // Source: Commands.sol in Uniswap universal-router
+    uint8 private constant COMMAND_V4_SWAP = 0x10;
+
+    // ── V4Router action bytes (packed inside V4_SWAP input) ─────────────────
+    // Source: Actions.sol in Uniswap v4-periphery
+    uint8 private constant ACTION_SWAP_EXACT_IN_SINGLE = 0x00;
+    uint8 private constant ACTION_SWAP_EXACT_IN = 0x01;
+    uint8 private constant ACTION_SETTLE_ALL = 0x0a;
+    uint8 private constant ACTION_TAKE_ALL = 0x0d;
+
+    EnumerableSet.AddressSet private uniRouters;
+
+    event UpdatedUniRouters(address[] routers, bool isSupported);
+
+    constructor(address _admin, address[] memory routers) BaseSwap(_admin) {
+        for (uint256 i = 0; i < routers.length; i++) {
+            uniRouters.add(routers[i]);
+        }
+    }
+
+    struct StepComputations {
+        uint160 sqrtPriceStartX96;
+        int24 tickNext;
+        bool initialized;
+        uint160 sqrtPriceNextX96;
+        uint256 amountIn;
+        uint256 amountOut;
+        uint256 feeAmount;
+    }
+
+    struct SwapState {
+        int256 amountSpecifiedRemaining;
+        int256 amountCalculated;
+        uint160 sqrtPriceX96;
+        int24 tick;
+        uint128 liquidity;
+    }
+
+    // ── Admin ────────────────────────────────────────────────────────────────
+
+    function getAllUniRouters() external view returns (address[] memory addresses) {
+        uint256 length = uniRouters.length();
+        addresses = new address[](length);
+        for (uint256 i = 0; i < length; i++) {
+            addresses[i] = uniRouters.at(i);
+        }
+    }
+
+    function updateUniRouters(address[] calldata routers, bool isSupported) external onlyAdmin {
+        for (uint256 i = 0; i < routers.length; i++) {
+            if (isSupported) {
+                uniRouters.add(routers[i]);
+            } else {
+                uniRouters.remove(routers[i]);
+            }
+        }
+        emit UpdatedUniRouters(routers, isSupported);
+    }
+
+    // ── ISwap — quote functions ──────────────────────────────────────────────
+
+    function getExpectedReturn(
+        GetExpectedReturnParams calldata params
+    ) external view override onlyProxyContract returns (uint256 destAmount) {
+        require(params.tradePath.length >= 2, "invalid tradePath");
+        uint256 hopCount = params.tradePath.length - 1;
+        (
+            ,
+            IStateView stateView,
+            uint24[] memory fees,
+            int24[] memory tickSpacings,
+            address[] memory hooks
+        ) = parseExtraArgs(hopCount, params.extraArgs);
+
+        destAmount = params.srcAmount;
+        for (uint256 i = 0; i < hopCount; i++) {
+            destAmount = getAmountOut(
+                stateView,
+                destAmount,
+                params.tradePath[i],
+                params.tradePath[i + 1],
+                fees[i],
+                tickSpacings[i],
+                hooks[i]
+            );
+        }
+    }
+
+    function getExpectedReturnWithImpact(
+        GetExpectedReturnParams calldata params
+    ) external view override onlyProxyContract returns (uint256 destAmount, uint256 priceImpact) {
+        require(params.tradePath.length >= 2, "invalid tradePath");
+        uint256 hopCount = params.tradePath.length - 1;
+        (
+            ,
+            IStateView stateView,
+            uint24[] memory fees,
+            int24[] memory tickSpacings,
+            address[] memory hooks
+        ) = parseExtraArgs(hopCount, params.extraArgs);
+
+        destAmount = params.srcAmount;
+        uint256 quote = params.srcAmount;
+        for (uint256 i = 0; i < hopCount; i++) {
+            destAmount = getAmountOut(
+                stateView,
+                destAmount,
+                params.tradePath[i],
+                params.tradePath[i + 1],
+                fees[i],
+                tickSpacings[i],
+                hooks[i]
+            );
+            quote = getQuote(
+                stateView,
+                quote,
+                params.tradePath[i],
+                params.tradePath[i + 1],
+                fees[i],
+                tickSpacings[i],
+                hooks[i]
+            );
+        }
+        priceImpact = quote <= destAmount ? 0 : quote.sub(destAmount).mul(BPS) / quote;
+    }
+
+    function getExpectedIn(
+        GetExpectedInParams calldata params
+    ) external view override onlyProxyContract returns (uint256 srcAmount) {
+        require(params.tradePath.length >= 2, "invalid tradePath");
+        uint256 hopCount = params.tradePath.length - 1;
+        (
+            ,
+            IStateView stateView,
+            uint24[] memory fees,
+            int24[] memory tickSpacings,
+            address[] memory hooks
+        ) = parseExtraArgs(hopCount, params.extraArgs);
+
+        srcAmount = params.destAmount;
+        for (uint256 i = params.tradePath.length - 1; i > 0; i--) {
+            srcAmount = getAmountIn(
+                stateView,
+                srcAmount,
+                params.tradePath[i - 1],
+                params.tradePath[i],
+                fees[i - 1],
+                tickSpacings[i - 1],
+                hooks[i - 1]
+            );
+        }
+    }
+
+    function getExpectedInWithImpact(
+        GetExpectedInParams calldata params
+    ) external view override onlyProxyContract returns (uint256 srcAmount, uint256 priceImpact) {
+        require(params.tradePath.length >= 2, "invalid tradePath");
+        uint256 hopCount = params.tradePath.length - 1;
+        (
+            ,
+            IStateView stateView,
+            uint24[] memory fees,
+            int24[] memory tickSpacings,
+            address[] memory hooks
+        ) = parseExtraArgs(hopCount, params.extraArgs);
+
+        srcAmount = params.destAmount;
+        for (uint256 i = params.tradePath.length - 1; i > 0; i--) {
+            srcAmount = getAmountIn(
+                stateView,
+                srcAmount,
+                params.tradePath[i - 1],
+                params.tradePath[i],
+                fees[i - 1],
+                tickSpacings[i - 1],
+                hooks[i - 1]
+            );
+        }
+        uint256 quote = srcAmount;
+        for (uint256 i = 0; i < hopCount; i++) {
+            quote = getQuote(
+                stateView,
+                quote,
+                params.tradePath[i],
+                params.tradePath[i + 1],
+                fees[i],
+                tickSpacings[i],
+                hooks[i]
+            );
+        }
+        priceImpact = quote <= params.destAmount
+            ? 0
+            : quote.sub(params.destAmount).mul(BPS) / quote;
+    }
+
+    // ── ISwap — swap ─────────────────────────────────────────────────────────
+
+    /// @notice Executes a V4 swap via the Universal Router.
+    ///         Output is delivered to params.recipient.
+    function swap(
+        SwapParams calldata params
+    ) external payable override onlyProxyContract returns (uint256 destAmount) {
+        require(params.tradePath.length >= 2, "invalid tradePath");
+        uint256 hopCount = params.tradePath.length - 1;
+        (
+            IUniversalRouterV4 router,
+            ,
+            uint24[] memory fees,
+            int24[] memory tickSpacings,
+            address[] memory hooks
+        ) = parseExtraArgs(hopCount, params.extraArgs);
+
+        address inputToken = params.tradePath[0];
+        address outputToken = params.tradePath[params.tradePath.length - 1];
+        bool inputIsETH = inputToken == address(ETH_TOKEN_ADDRESS);
+        bool outputIsETH = outputToken == address(ETH_TOKEN_ADDRESS);
+
+        // Transfer input tokens to the Universal Router before calling execute().
+        // For ERC20: our contract already holds the tokens (sent by proxy).
+        // For ETH: we forward msg.value with the execute() call.
+        if (!inputIsETH) {
+            IERC20Ext(inputToken).safeTransfer(address(router), params.srcAmount);
+        }
+
+        // Snapshot our own balance of the output token; TAKE_ALL sends output here.
+        uint256 balanceBefore = outputIsETH
+            ? address(this).balance
+            : IERC20Ext(outputToken).balanceOf(address(this));
+
+        if (hopCount == 1) {
+            swapExactInputSingle(
+                router,
+                params.srcAmount,
+                params.minDestAmount,
+                params.tradePath,
+                fees[0],
+                tickSpacings[0],
+                hooks[0],
+                inputIsETH
+            );
+        } else {
+            swapExactInput(
+                router,
+                params.srcAmount,
+                params.minDestAmount,
+                params.tradePath,
+                fees,
+                tickSpacings,
+                hooks,
+                inputIsETH
+            );
+        }
+
+        uint256 balanceAfter = outputIsETH
+            ? address(this).balance
+            : IERC20Ext(outputToken).balanceOf(address(this));
+
+        destAmount = balanceAfter.sub(balanceBefore);
+
+        // Forward output to recipient.
+        if (outputIsETH) {
+            payable(params.recipient).transfer(destAmount);
+        } else {
+            IERC20Ext(outputToken).safeTransfer(params.recipient, destAmount);
+        }
+    }
+
+    // ── Internal swap builders ────────────────────────────────────────────────
+
+    function swapExactInputSingle(
+        IUniversalRouterV4 router,
+        uint256 srcAmount,
+        uint256 minDestAmount,
+        address[] calldata tradePath,
+        uint24 fee,
+        int24 tickSpacing,
+        address hooks,
+        bool inputIsETH
+    ) internal {
+        address currency0 = v4Currency(tradePath[0]);
+        address currency1 = v4Currency(tradePath[1]);
+        bool zeroForOne = currency0 < currency1;
+
+        PoolKey memory poolKey = PoolKey({
+            currency0: zeroForOne ? currency0 : currency1,
+            currency1: zeroForOne ? currency1 : currency0,
+            fee: fee,
+            tickSpacing: tickSpacing,
+            hooks: hooks
+        });
+
+        // actions: SWAP_EXACT_IN_SINGLE | SETTLE_ALL | TAKE_ALL
+        bytes memory actions = abi.encodePacked(
+            ACTION_SWAP_EXACT_IN_SINGLE,
+            ACTION_SETTLE_ALL,
+            ACTION_TAKE_ALL
+        );
+
+        bytes[] memory actionParams = new bytes[](3);
+        // SWAP_EXACT_IN_SINGLE params
+        actionParams[0] = abi.encode(
+            poolKey,
+            zeroForOne,
+            uint128(srcAmount),
+            uint128(minDestAmount),
+            bytes("")
+        );
+        // SETTLE_ALL params: (currency, maxAmount)
+        actionParams[1] = abi.encode(currency0 < currency1 ? currency0 : currency1, srcAmount);
+        // TAKE_ALL params: (currency, minAmount) — output is sent to msgSender (this contract)
+        actionParams[2] = abi.encode(zeroForOne ? currency1 : currency0, minDestAmount);
+
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = abi.encode(actions, actionParams);
+
+        router.execute{value: inputIsETH ? srcAmount : 0}(
+            abi.encodePacked(COMMAND_V4_SWAP),
+            inputs,
+            MAX_AMOUNT
+        );
+    }
+
+    function swapExactInput(
+        IUniversalRouterV4 router,
+        uint256 srcAmount,
+        uint256 minDestAmount,
+        address[] calldata tradePath,
+        uint24[] memory fees,
+        int24[] memory tickSpacings,
+        address[] memory hooks,
+        bool inputIsETH
+    ) internal {
+        address currencyIn = v4Currency(tradePath[0]);
+        address currencyOut = v4Currency(tradePath[tradePath.length - 1]);
+
+        PathKey[] memory path = new PathKey[](fees.length);
+        for (uint256 i = 0; i < fees.length; i++) {
+            path[i] = PathKey({
+                intermediateCurrency: v4Currency(tradePath[i + 1]),
+                fee: fees[i],
+                tickSpacing: tickSpacings[i],
+                hooks: hooks[i],
+                hookData: bytes("")
+            });
+        }
+
+        bytes memory actions = abi.encodePacked(
+            ACTION_SWAP_EXACT_IN,
+            ACTION_SETTLE_ALL,
+            ACTION_TAKE_ALL
+        );
+
+        bytes[] memory actionParams = new bytes[](3);
+        // SWAP_EXACT_IN params: (currencyIn, PathKey[], amountIn, amountOutMinimum)
+        actionParams[0] = abi.encode(currencyIn, path, uint128(srcAmount), uint128(minDestAmount));
+        // SETTLE_ALL params: (currency, maxAmount)
+        actionParams[1] = abi.encode(currencyIn, srcAmount);
+        // TAKE_ALL params: (currency, minAmount)
+        actionParams[2] = abi.encode(currencyOut, minDestAmount);
+
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = abi.encode(actions, actionParams);
+
+        router.execute{value: inputIsETH ? srcAmount : 0}(
+            abi.encodePacked(COMMAND_V4_SWAP),
+            inputs,
+            MAX_AMOUNT
+        );
+    }
+
+    // ── Quote simulation ─────────────────────────────────────────────────────
+
+    function getAmountOut(
+        IStateView stateView,
+        uint256 amountIn,
+        address tokenIn,
+        address tokenOut,
+        uint24 fee,
+        int24 tickSpacing,
+        address hooks
+    ) private view returns (uint256) {
+        return
+            getAmount(stateView, amountIn.toInt256(), tokenIn, tokenOut, fee, tickSpacing, hooks);
+    }
+
+    function getAmountIn(
+        IStateView stateView,
+        uint256 amountOut,
+        address tokenIn,
+        address tokenOut,
+        uint24 fee,
+        int24 tickSpacing,
+        address hooks
+    ) private view returns (uint256) {
+        return
+            getAmount(
+                stateView,
+                -amountOut.toInt256(),
+                tokenIn,
+                tokenOut,
+                fee,
+                tickSpacing,
+                hooks
+            );
+    }
+
+    /// @dev Simulates the V4 AMM swap step-by-step using StateView.
+    ///      The concentrated-liquidity math is identical to V3.
+    function getAmount(
+        IStateView stateView,
+        int256 amountSpecified,
+        address tokenIn,
+        address tokenOut,
+        uint24 fee,
+        int24 tickSpacing,
+        address hooks
+    ) private view returns (uint256 amount) {
+        address currency0 = v4Currency(tokenIn);
+        address currency1 = v4Currency(tokenOut);
+        bool zeroForOne = currency0 < currency1;
+
+        PoolKey memory poolKey = PoolKey({
+            currency0: zeroForOne ? currency0 : currency1,
+            currency1: zeroForOne ? currency1 : currency0,
+            fee: fee,
+            tickSpacing: tickSpacing,
+            hooks: hooks
+        });
+        bytes32 poolId = computePoolId(poolKey);
+
+        uint160 sqrtPriceLimitX96 = zeroForOne
+            ? TickMath.MIN_SQRT_RATIO + 1
+            : TickMath.MAX_SQRT_RATIO - 1;
+
+        SwapState memory state;
+        state.amountSpecifiedRemaining = amountSpecified;
+        state.amountCalculated = 0;
+        (state.sqrtPriceX96, state.tick, , ) = stateView.getSlot0(poolId);
+        state.liquidity = stateView.getLiquidity(poolId);
+        bool exactInput = amountSpecified > 0;
+
+        while (state.amountSpecifiedRemaining != 0 && state.sqrtPriceX96 != sqrtPriceLimitX96) {
+            StepComputations memory step;
+            step.sqrtPriceStartX96 = state.sqrtPriceX96;
+
+            (step.tickNext, step.initialized) = stateView.nextInitializedTickWithinOneWord(
+                poolId,
+                state.tick,
+                tickSpacing,
+                zeroForOne
+            );
+
+            if (step.tickNext < TickMath.MIN_TICK) {
+                step.tickNext = TickMath.MIN_TICK;
+            } else if (step.tickNext > TickMath.MAX_TICK) {
+                step.tickNext = TickMath.MAX_TICK;
+            }
+
+            step.sqrtPriceNextX96 = TickMath.getSqrtRatioAtTick(step.tickNext);
+
+            (state.sqrtPriceX96, step.amountIn, step.amountOut, step.feeAmount) = SwapMath
+                .computeSwapStep(
+                    state.sqrtPriceX96,
+                    (
+                        zeroForOne
+                            ? step.sqrtPriceNextX96 < sqrtPriceLimitX96
+                            : step.sqrtPriceNextX96 > sqrtPriceLimitX96
+                    )
+                        ? sqrtPriceLimitX96
+                        : step.sqrtPriceNextX96,
+                    state.liquidity,
+                    state.amountSpecifiedRemaining,
+                    fee
+                );
+
+            if (exactInput) {
+                state.amountSpecifiedRemaining -= (step.amountIn + step.feeAmount).toInt256();
+                state.amountCalculated = state.amountCalculated.sub(step.amountOut.toInt256());
+            } else {
+                state.amountSpecifiedRemaining += step.amountOut.toInt256();
+                state.amountCalculated = state.amountCalculated.add(
+                    (step.amountIn + step.feeAmount).toInt256()
+                );
+            }
+
+            if (state.sqrtPriceX96 == step.sqrtPriceNextX96) {
+                if (step.initialized) {
+                    (, int128 liquidityNet) = stateView.getTickLiquidityNet(poolId, step.tickNext);
+                    if (zeroForOne) liquidityNet = -liquidityNet;
+                    state.liquidity = LiquidityMath.addDelta(state.liquidity, liquidityNet);
+                }
+                state.tick = zeroForOne ? step.tickNext - 1 : step.tickNext;
+            } else if (state.sqrtPriceX96 != step.sqrtPriceStartX96) {
+                state.tick = TickMath.getTickAtSqrtRatio(state.sqrtPriceX96);
+            }
+        }
+
+        amount = state.amountCalculated < 0
+            ? uint256(-state.amountCalculated)
+            : uint256(state.amountCalculated);
+    }
+
+    /// @dev Spot-price quote (no slippage) used to compute price impact.
+    function getQuote(
+        IStateView stateView,
+        uint256 quote,
+        address tokenIn,
+        address tokenOut,
+        uint24 fee,
+        int24 tickSpacing,
+        address hooks
+    ) internal view returns (uint256 quoteOut) {
+        address currency0 = v4Currency(tokenIn);
+        address currency1 = v4Currency(tokenOut);
+        bool zeroForOne = currency0 < currency1;
+
+        PoolKey memory poolKey = PoolKey({
+            currency0: zeroForOne ? currency0 : currency1,
+            currency1: zeroForOne ? currency1 : currency0,
+            fee: fee,
+            tickSpacing: tickSpacing,
+            hooks: hooks
+        });
+
+        (uint160 sqrtPriceX96, int24 tick, , ) = stateView.getSlot0(computePoolId(poolKey));
+        uint160 sqrtPrice = zeroForOne ? sqrtPriceX96 : TickMath.getSqrtRatioAtTick(-tick);
+        quoteOut = quote.mul(sqrtPrice) >> 96;
+        quoteOut = quoteOut.mul(sqrtPrice) >> 96;
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// @dev V4 uses address(0) for native ETH; we map ETH_TOKEN_ADDRESS accordingly.
+    function v4Currency(address token) internal view returns (address) {
+        return token == address(ETH_TOKEN_ADDRESS) ? address(0) : token;
+    }
+
+    /// @dev PoolId = keccak256(abi.encode(PoolKey)), matching V4 PoolIdLibrary.toId().
+    function computePoolId(PoolKey memory key) internal pure returns (bytes32) {
+        return keccak256(abi.encode(key));
+    }
+
+    /// @dev Parses extraArgs: <[20B] router><[20B] stateView><per hop: [3B] fee | [3B] tickSpacing | [20B] hooks>
+    function parseExtraArgs(
+        uint256 hopCount,
+        bytes calldata extraArgs
+    )
+        internal
+        view
+        returns (
+            IUniversalRouterV4 router,
+            IStateView stateView,
+            uint24[] memory fees,
+            int24[] memory tickSpacings,
+            address[] memory hooks
+        )
+    {
+        router = IUniversalRouterV4(extraArgs.toAddress(0));
+        stateView = IStateView(extraArgs.toAddress(20));
+        require(address(router) != address(0), "invalid router");
+        require(uniRouters.contains(address(router)), "unsupported router");
+
+        fees = new uint24[](hopCount);
+        tickSpacings = new int24[](hopCount);
+        hooks = new address[](hopCount);
+
+        // Header is 40 bytes; each hop is 3 + 3 + 20 = 26 bytes
+        for (uint256 i = 0; i < hopCount; i++) {
+            uint256 offset = 40 + i * 26;
+            fees[i] = extraArgs.toUint24(offset);
+            tickSpacings[i] = int24(extraArgs.toUint24(offset + 3));
+            hooks[i] = extraArgs.toAddress(offset + 6);
+        }
+    }
+}

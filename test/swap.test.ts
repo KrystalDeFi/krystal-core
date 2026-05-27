@@ -474,6 +474,46 @@ describe('swap test', async () => {
     }
   }
 
+  if (networkSetting.uniswapV4) {
+    for (let router of networkSetting.uniswapV4.routers) {
+      // Use V2 router as a rough price reference (same underlying assets)
+      const routerContractV2 = (await ethers.getContractAt(
+        'IUniswapV2Router02',
+        Object.values(networkSetting.uniswap!.routers)[0].address
+      )) as IUniswapV2Router02;
+
+      executeSwapTest({
+        name: 'uniV4',
+        getSwapContract: async () => {
+          return setup.krystalContracts.swapContracts!.uniSwapV4!.address;
+        },
+        router,
+        generateArgsFunc: async (tradePath: string[]) => {
+          const stateView = networkSetting.uniswapV4!.stateView;
+          // extraArgs: <router 20B><stateView 20B> then per hop: <fee 3B><tickSpacing 3B><hooks 20B>
+          // Default: fee=3000 (0x0BB8), tickSpacing=60 (0x00003C), no hooks (address(0))
+          let extraArgs =
+            hexlify(arrayify(router)) + arrayify(stateView).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '');
+          for (let i = 0; i < tradePath.length - 1; i++) {
+            extraArgs = extraArgs + '000BB8'; // fee = 3000
+            extraArgs = extraArgs + '00003C'; // tickSpacing = 60
+            extraArgs = extraArgs + '0000000000000000000000000000000000000000'; // no hooks
+          }
+          return extraArgs;
+        },
+        platformFee,
+        getActualRate: async (sourceAmount: BigNumber, tradePath: string[], feeMode: FeeMode) => {
+          const amounts = await routerContractV2.getAmountsOut(sourceAmount, tradePath);
+          return amounts[amounts.length - 1];
+        },
+        maxDiffAllowed: 2, // allow slightly more diff since V4 fee tiers may differ from V2
+        getExpectedInSupported: true,
+        testingTokens: networkSetting.uniswapV4.testingTokens ?? Object.keys(networkSetting.tokens),
+        expectedPriceImpactFn: null,
+      });
+    }
+  }
+
   /*
   if (networkSetting.kyberProxy) {
     // Using v2 router as a price estimate for testing

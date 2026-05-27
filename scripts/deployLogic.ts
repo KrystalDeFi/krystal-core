@@ -23,6 +23,7 @@ import {
   UniSwapV3Bsc,
   OpenOcean,
   Okx,
+  UniSwapV4,
 } from '../typechain';
 import {Contract} from '@ethersproject/contracts';
 import {IAaveV2Config} from './config_utils';
@@ -60,6 +61,7 @@ export interface KrystalContracts {
     uniSwapV3Bsc?: UniSwapV3Bsc;
     openOcean?: OpenOcean;
     okx?: Okx;
+    uniSwapV4?: UniSwapV4;
   };
   lendingContracts?: {
     compoundLending?: CompoundLending;
@@ -137,6 +139,10 @@ export const deploy = async (
   log(0, 'Updating velodrome config');
   log(0, '======================\n');
   await updateVelodrome(deployedContracts.swapContracts?.velodrome, extraArgs);
+
+  log(0, 'Updating uniswapV4 config');
+  log(0, '======================\n');
+  await updateUniSwapV4(deployedContracts.swapContracts?.uniSwapV4, extraArgs);
 
   // log(0, 'Updating compound/clones config');
   // log(0, '======================\n');
@@ -351,6 +357,18 @@ async function deployContracts(
             Object.values(networkConfig.velodrome.stablecoins).map((c) => c),
             networkConfig.wNative
           )) as Velodrome),
+
+      uniSwapV4: !networkConfig.uniswapV4
+        ? undefined
+        : ((await deployContract(
+            ++step,
+            networkConfig.autoVerifyContract,
+            'UniSwapV4',
+            existingContract?.['swapContracts']?.['uniSwapV4'],
+            undefined,
+            contractAdmin,
+            networkConfig.uniswapV4.routers
+          )) as UniSwapV4),
     };
 
     lendingContracts = {
@@ -870,6 +888,19 @@ async function updateVelodrome(velodrome: Velodrome | undefined, extraArgs: {fro
       await printInfo(tx);
     }
   }
+}
+
+async function updateUniSwapV4(uniSwapV4: UniSwapV4 | undefined, extraArgs: {from?: string}) {
+  if (!uniSwapV4 || !networkConfig.uniswapV4) {
+    log(1, 'protocol not supported on this env');
+    return;
+  }
+  log(1, 'update supported routers');
+  let existing = (await uniSwapV4.getAllUniRouters()).map((r) => r.toLowerCase());
+  let configRouters = networkConfig.uniswapV4!.routers.map((r) => r.toLowerCase());
+  let toBeRemoved = existing.filter((add) => !configRouters.includes(add));
+  let toBeAdded = configRouters.filter((add) => !existing.includes(add));
+  await updateAddressSet(uniSwapV4.populateTransaction.updateUniRouters, toBeRemoved, toBeAdded, extraArgs);
 }
 
 async function updateCompoundLending(compoundLending: CompoundLending | undefined, extraArgs: {from?: string}) {
