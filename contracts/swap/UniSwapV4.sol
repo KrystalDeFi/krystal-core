@@ -16,23 +16,35 @@ import "@uniswap/v3-core/contracts/libraries/LiquidityMath.sol";
 /// @dev V4 pool state is stored in a singleton PoolManager, accessed via StateView
 interface IStateView {
     /// @notice Returns slot0 data for a V4 pool identified by its PoolId (keccak256 of PoolKey)
-    function getSlot0(
-        bytes32 poolId
-    ) external view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee);
+    function getSlot0(bytes32 poolId)
+        external
+        view
+        returns (
+            uint160 sqrtPriceX96,
+            int24 tick,
+            uint24 protocolFee,
+            uint24 lpFee
+        );
 
     function getLiquidity(bytes32 poolId) external view returns (uint128 liquidity);
 
     /// @notice Returns the tick bitmap word for the given pool and word position
-    function getTickBitmap(
-        bytes32 poolId,
-        int16 wordPosition
-    ) external view returns (uint256 bitmap);
+    function getTickBitmap(bytes32 poolId, int16 wordPosition)
+        external
+        view
+        returns (uint256 bitmap);
 
     /// @notice Returns liquidityGross and liquidityNet for a tick in a V4 pool
-    function getTickLiquidityNet(
-        bytes32 poolId,
-        int24 tick
-    ) external view returns (uint128 liquidityGross, int128 liquidityNet);
+    function getTickLiquidityNet(bytes32 poolId, int24 tick)
+        external
+        view
+        returns (uint128 liquidityGross, int128 liquidityNet);
+
+    /// @notice Returns the tick spacing for a V4 pool
+    function getTickSpacing(bytes32 poolId) external view returns (int24 tickSpacing);
+
+    /// @notice Returns the hooks address for a V4 pool
+    function getHooks(bytes32 poolId) external view returns (address hooks);
 }
 
 /// @dev Minimal Universal Router interface for V4 swaps
@@ -112,7 +124,7 @@ library TickBitmapV4 {
 /// extraArgs encoding (per trade):
 ///   [20B] Universal Router address
 ///   [20B] StateView address
-///   per hop: [3B] uint24 fee | [3B] uint24 tickSpacing (always positive, cast to int24) | [20B] hooks address
+///   per hop: [32B] bytes32 poolId (keccak256 of PoolKey)
 contract UniSwapV4 is BaseSwap {
     using SafeERC20 for IERC20Ext;
     using Address for address;
@@ -162,6 +174,14 @@ contract UniSwapV4 is BaseSwap {
         uint128 liquidity;
     }
 
+    struct SwapConfig {
+        int24 tickSpacing;
+        uint160 sqrtPriceLimitX96;
+        uint24 fee;
+        bool exactInput;
+        bool zeroForOne;
+    }
+
     // ── Admin ────────────────────────────────────────────────────────────────
 
     function getAllUniRouters() external view returns (address[] memory addresses) {
@@ -185,18 +205,19 @@ contract UniSwapV4 is BaseSwap {
 
     // ── ISwap — quote functions ──────────────────────────────────────────────
 
-    function getExpectedReturn(
-        GetExpectedReturnParams calldata params
-    ) external view override onlyProxyContract returns (uint256 destAmount) {
+    function getExpectedReturn(GetExpectedReturnParams calldata params)
+        external
+        view
+        override
+        onlyProxyContract
+        returns (uint256 destAmount)
+    {
         require(params.tradePath.length >= 2, "invalid tradePath");
         uint256 hopCount = params.tradePath.length - 1;
-        (
-            ,
-            IStateView stateView,
-            uint24[] memory fees,
-            int24[] memory tickSpacings,
-            address[] memory hooks
-        ) = parseExtraArgs(hopCount, params.extraArgs);
+        (, IStateView stateView, bytes32[] memory poolIds) = parseExtraArgs(
+            hopCount,
+            params.extraArgs
+        );
 
         destAmount = params.srcAmount;
         for (uint256 i = 0; i < hopCount; i++) {
@@ -205,25 +226,24 @@ contract UniSwapV4 is BaseSwap {
                 destAmount,
                 params.tradePath[i],
                 params.tradePath[i + 1],
-                fees[i],
-                tickSpacings[i],
-                hooks[i]
+                poolIds[i]
             );
         }
     }
 
-    function getExpectedReturnWithImpact(
-        GetExpectedReturnParams calldata params
-    ) external view override onlyProxyContract returns (uint256 destAmount, uint256 priceImpact) {
+    function getExpectedReturnWithImpact(GetExpectedReturnParams calldata params)
+        external
+        view
+        override
+        onlyProxyContract
+        returns (uint256 destAmount, uint256 priceImpact)
+    {
         require(params.tradePath.length >= 2, "invalid tradePath");
         uint256 hopCount = params.tradePath.length - 1;
-        (
-            ,
-            IStateView stateView,
-            uint24[] memory fees,
-            int24[] memory tickSpacings,
-            address[] memory hooks
-        ) = parseExtraArgs(hopCount, params.extraArgs);
+        (, IStateView stateView, bytes32[] memory poolIds) = parseExtraArgs(
+            hopCount,
+            params.extraArgs
+        );
 
         destAmount = params.srcAmount;
         uint256 quote = params.srcAmount;
@@ -233,35 +253,32 @@ contract UniSwapV4 is BaseSwap {
                 destAmount,
                 params.tradePath[i],
                 params.tradePath[i + 1],
-                fees[i],
-                tickSpacings[i],
-                hooks[i]
+                poolIds[i]
             );
             quote = getQuote(
                 stateView,
                 quote,
                 params.tradePath[i],
                 params.tradePath[i + 1],
-                fees[i],
-                tickSpacings[i],
-                hooks[i]
+                poolIds[i]
             );
         }
         priceImpact = quote <= destAmount ? 0 : quote.sub(destAmount).mul(BPS) / quote;
     }
 
-    function getExpectedIn(
-        GetExpectedInParams calldata params
-    ) external view override onlyProxyContract returns (uint256 srcAmount) {
+    function getExpectedIn(GetExpectedInParams calldata params)
+        external
+        view
+        override
+        onlyProxyContract
+        returns (uint256 srcAmount)
+    {
         require(params.tradePath.length >= 2, "invalid tradePath");
         uint256 hopCount = params.tradePath.length - 1;
-        (
-            ,
-            IStateView stateView,
-            uint24[] memory fees,
-            int24[] memory tickSpacings,
-            address[] memory hooks
-        ) = parseExtraArgs(hopCount, params.extraArgs);
+        (, IStateView stateView, bytes32[] memory poolIds) = parseExtraArgs(
+            hopCount,
+            params.extraArgs
+        );
 
         srcAmount = params.destAmount;
         for (uint256 i = params.tradePath.length - 1; i > 0; i--) {
@@ -270,25 +287,24 @@ contract UniSwapV4 is BaseSwap {
                 srcAmount,
                 params.tradePath[i - 1],
                 params.tradePath[i],
-                fees[i - 1],
-                tickSpacings[i - 1],
-                hooks[i - 1]
+                poolIds[i - 1]
             );
         }
     }
 
-    function getExpectedInWithImpact(
-        GetExpectedInParams calldata params
-    ) external view override onlyProxyContract returns (uint256 srcAmount, uint256 priceImpact) {
+    function getExpectedInWithImpact(GetExpectedInParams calldata params)
+        external
+        view
+        override
+        onlyProxyContract
+        returns (uint256 srcAmount, uint256 priceImpact)
+    {
         require(params.tradePath.length >= 2, "invalid tradePath");
         uint256 hopCount = params.tradePath.length - 1;
-        (
-            ,
-            IStateView stateView,
-            uint24[] memory fees,
-            int24[] memory tickSpacings,
-            address[] memory hooks
-        ) = parseExtraArgs(hopCount, params.extraArgs);
+        (, IStateView stateView, bytes32[] memory poolIds) = parseExtraArgs(
+            hopCount,
+            params.extraArgs
+        );
 
         srcAmount = params.destAmount;
         for (uint256 i = params.tradePath.length - 1; i > 0; i--) {
@@ -297,9 +313,7 @@ contract UniSwapV4 is BaseSwap {
                 srcAmount,
                 params.tradePath[i - 1],
                 params.tradePath[i],
-                fees[i - 1],
-                tickSpacings[i - 1],
-                hooks[i - 1]
+                poolIds[i - 1]
             );
         }
         uint256 quote = srcAmount;
@@ -309,9 +323,7 @@ contract UniSwapV4 is BaseSwap {
                 quote,
                 params.tradePath[i],
                 params.tradePath[i + 1],
-                fees[i],
-                tickSpacings[i],
-                hooks[i]
+                poolIds[i]
             );
         }
         priceImpact = quote <= params.destAmount
@@ -323,17 +335,19 @@ contract UniSwapV4 is BaseSwap {
 
     /// @notice Executes a V4 swap via the Universal Router.
     ///         Output is delivered to params.recipient.
-    function swap(
-        SwapParams calldata params
-    ) external payable override onlyProxyContract returns (uint256 destAmount) {
+    function swap(SwapParams calldata params)
+        external
+        payable
+        override
+        onlyProxyContract
+        returns (uint256 destAmount)
+    {
         require(params.tradePath.length >= 2, "invalid tradePath");
         uint256 hopCount = params.tradePath.length - 1;
         (
             IUniversalRouterV4 router,
-            ,
-            uint24[] memory fees,
-            int24[] memory tickSpacings,
-            address[] memory hooks
+            IStateView stateView,
+            bytes32[] memory poolIds
         ) = parseExtraArgs(hopCount, params.extraArgs);
 
         address inputToken = params.tradePath[0];
@@ -356,23 +370,21 @@ contract UniSwapV4 is BaseSwap {
         if (hopCount == 1) {
             swapExactInputSingle(
                 router,
+                stateView,
                 params.srcAmount,
                 params.minDestAmount,
                 params.tradePath,
-                fees[0],
-                tickSpacings[0],
-                hooks[0],
+                poolIds[0],
                 inputIsETH
             );
         } else {
             swapExactInput(
                 router,
+                stateView,
                 params.srcAmount,
                 params.minDestAmount,
                 params.tradePath,
-                fees,
-                tickSpacings,
-                hooks,
+                poolIds,
                 inputIsETH
             );
         }
@@ -393,27 +405,46 @@ contract UniSwapV4 is BaseSwap {
 
     // ── Internal swap builders ────────────────────────────────────────────────
 
+    function _buildPoolKey(
+        IStateView stateView,
+        bytes32 poolId,
+        address currency0,
+        address currency1,
+        bool zeroForOne
+    ) internal view returns (PoolKey memory) {
+        (, , , uint24 fee) = stateView.getSlot0(poolId);
+        int24 tickSpacing = stateView.getTickSpacing(poolId);
+        address hooks = stateView.getHooks(poolId);
+        return
+            PoolKey({
+                currency0: zeroForOne ? currency0 : currency1,
+                currency1: zeroForOne ? currency1 : currency0,
+                fee: fee,
+                tickSpacing: tickSpacing,
+                hooks: hooks
+            });
+    }
+
     function swapExactInputSingle(
         IUniversalRouterV4 router,
+        IStateView stateView,
         uint256 srcAmount,
         uint256 minDestAmount,
         address[] calldata tradePath,
-        uint24 fee,
-        int24 tickSpacing,
-        address hooks,
+        bytes32 poolId,
         bool inputIsETH
     ) internal {
         address currency0 = v4Currency(tradePath[0]);
         address currency1 = v4Currency(tradePath[1]);
         bool zeroForOne = currency0 < currency1;
 
-        PoolKey memory poolKey = PoolKey({
-            currency0: zeroForOne ? currency0 : currency1,
-            currency1: zeroForOne ? currency1 : currency0,
-            fee: fee,
-            tickSpacing: tickSpacing,
-            hooks: hooks
-        });
+        PoolKey memory poolKey = _buildPoolKey(
+            stateView,
+            poolId,
+            currency0,
+            currency1,
+            zeroForOne
+        );
 
         // actions: SWAP_EXACT_IN_SINGLE | SETTLE_ALL | TAKE_ALL
         bytes memory actions = abi.encodePacked(
@@ -448,24 +479,26 @@ contract UniSwapV4 is BaseSwap {
 
     function swapExactInput(
         IUniversalRouterV4 router,
+        IStateView stateView,
         uint256 srcAmount,
         uint256 minDestAmount,
         address[] calldata tradePath,
-        uint24[] memory fees,
-        int24[] memory tickSpacings,
-        address[] memory hooks,
+        bytes32[] memory poolIds,
         bool inputIsETH
     ) internal {
         address currencyIn = v4Currency(tradePath[0]);
         address currencyOut = v4Currency(tradePath[tradePath.length - 1]);
 
-        PathKey[] memory path = new PathKey[](fees.length);
-        for (uint256 i = 0; i < fees.length; i++) {
+        PathKey[] memory path = new PathKey[](poolIds.length);
+        for (uint256 i = 0; i < poolIds.length; i++) {
+            (, , , uint24 fee) = stateView.getSlot0(poolIds[i]);
+            int24 tickSpacing = stateView.getTickSpacing(poolIds[i]);
+            address hooks = stateView.getHooks(poolIds[i]);
             path[i] = PathKey({
                 intermediateCurrency: v4Currency(tradePath[i + 1]),
-                fee: fees[i],
-                tickSpacing: tickSpacings[i],
-                hooks: hooks[i],
+                fee: fee,
+                tickSpacing: tickSpacing,
+                hooks: hooks,
                 hookData: bytes("")
             });
         }
@@ -501,12 +534,9 @@ contract UniSwapV4 is BaseSwap {
         uint256 amountIn,
         address tokenIn,
         address tokenOut,
-        uint24 fee,
-        int24 tickSpacing,
-        address hooks
+        bytes32 poolId
     ) private view returns (uint256) {
-        return
-            getAmount(stateView, amountIn.toInt256(), tokenIn, tokenOut, fee, tickSpacing, hooks);
+        return getAmount(stateView, amountIn.toInt256(), tokenIn, tokenOut, poolId);
     }
 
     function getAmountIn(
@@ -514,20 +544,9 @@ contract UniSwapV4 is BaseSwap {
         uint256 amountOut,
         address tokenIn,
         address tokenOut,
-        uint24 fee,
-        int24 tickSpacing,
-        address hooks
+        bytes32 poolId
     ) private view returns (uint256) {
-        return
-            getAmount(
-                stateView,
-                -amountOut.toInt256(),
-                tokenIn,
-                tokenOut,
-                fee,
-                tickSpacing,
-                hooks
-            );
+        return getAmount(stateView, -amountOut.toInt256(), tokenIn, tokenOut, poolId);
     }
 
     /// @dev Simulates the V4 AMM swap step-by-step using StateView.
@@ -537,43 +556,37 @@ contract UniSwapV4 is BaseSwap {
         int256 amountSpecified,
         address tokenIn,
         address tokenOut,
-        uint24 fee,
-        int24 tickSpacing,
-        address hooks
+        bytes32 poolId
     ) private view returns (uint256 amount) {
-        address currency0 = v4Currency(tokenIn);
-        address currency1 = v4Currency(tokenOut);
-        bool zeroForOne = currency0 < currency1;
-
-        PoolKey memory poolKey = PoolKey({
-            currency0: zeroForOne ? currency0 : currency1,
-            currency1: zeroForOne ? currency1 : currency0,
-            fee: fee,
-            tickSpacing: tickSpacing,
-            hooks: hooks
-        });
-        bytes32 poolId = computePoolId(poolKey);
-
-        uint160 sqrtPriceLimitX96 = zeroForOne
+        SwapConfig memory cfg;
+        {
+            address currency0 = v4Currency(tokenIn);
+            address currency1 = v4Currency(tokenOut);
+            cfg.zeroForOne = currency0 < currency1;
+        }
+        cfg.tickSpacing = stateView.getTickSpacing(poolId);
+        cfg.sqrtPriceLimitX96 = cfg.zeroForOne
             ? TickMath.MIN_SQRT_RATIO + 1
             : TickMath.MAX_SQRT_RATIO - 1;
 
         SwapState memory state;
         state.amountSpecifiedRemaining = amountSpecified;
         state.amountCalculated = 0;
-        (state.sqrtPriceX96, state.tick, , ) = stateView.getSlot0(poolId);
+        (state.sqrtPriceX96, state.tick, , cfg.fee) = stateView.getSlot0(poolId);
         state.liquidity = stateView.getLiquidity(poolId);
-        bool exactInput = amountSpecified > 0;
+        cfg.exactInput = amountSpecified > 0;
 
-        while (state.amountSpecifiedRemaining != 0 && state.sqrtPriceX96 != sqrtPriceLimitX96) {
+        while (
+            state.amountSpecifiedRemaining != 0 && state.sqrtPriceX96 != cfg.sqrtPriceLimitX96
+        ) {
             StepComputations memory step;
             step.sqrtPriceStartX96 = state.sqrtPriceX96;
 
             (step.tickNext, step.initialized) = stateView.nextInitializedTickWithinOneWord(
                 poolId,
                 state.tick,
-                tickSpacing,
-                zeroForOne
+                cfg.tickSpacing,
+                cfg.zeroForOne
             );
 
             if (step.tickNext < TickMath.MIN_TICK) {
@@ -585,21 +598,21 @@ contract UniSwapV4 is BaseSwap {
             step.sqrtPriceNextX96 = TickMath.getSqrtRatioAtTick(step.tickNext);
 
             (state.sqrtPriceX96, step.amountIn, step.amountOut, step.feeAmount) = SwapMath
-                .computeSwapStep(
-                    state.sqrtPriceX96,
-                    (
-                        zeroForOne
-                            ? step.sqrtPriceNextX96 < sqrtPriceLimitX96
-                            : step.sqrtPriceNextX96 > sqrtPriceLimitX96
-                    )
-                        ? sqrtPriceLimitX96
-                        : step.sqrtPriceNextX96,
-                    state.liquidity,
-                    state.amountSpecifiedRemaining,
-                    fee
-                );
+            .computeSwapStep(
+                state.sqrtPriceX96,
+                (
+                    cfg.zeroForOne
+                        ? step.sqrtPriceNextX96 < cfg.sqrtPriceLimitX96
+                        : step.sqrtPriceNextX96 > cfg.sqrtPriceLimitX96
+                )
+                    ? cfg.sqrtPriceLimitX96
+                    : step.sqrtPriceNextX96,
+                state.liquidity,
+                state.amountSpecifiedRemaining,
+                cfg.fee
+            );
 
-            if (exactInput) {
+            if (cfg.exactInput) {
                 state.amountSpecifiedRemaining -= (step.amountIn + step.feeAmount).toInt256();
                 state.amountCalculated = state.amountCalculated.sub(step.amountOut.toInt256());
             } else {
@@ -612,10 +625,10 @@ contract UniSwapV4 is BaseSwap {
             if (state.sqrtPriceX96 == step.sqrtPriceNextX96) {
                 if (step.initialized) {
                     (, int128 liquidityNet) = stateView.getTickLiquidityNet(poolId, step.tickNext);
-                    if (zeroForOne) liquidityNet = -liquidityNet;
+                    if (cfg.zeroForOne) liquidityNet = -liquidityNet;
                     state.liquidity = LiquidityMath.addDelta(state.liquidity, liquidityNet);
                 }
-                state.tick = zeroForOne ? step.tickNext - 1 : step.tickNext;
+                state.tick = cfg.zeroForOne ? step.tickNext - 1 : step.tickNext;
             } else if (state.sqrtPriceX96 != step.sqrtPriceStartX96) {
                 state.tick = TickMath.getTickAtSqrtRatio(state.sqrtPriceX96);
             }
@@ -632,23 +645,13 @@ contract UniSwapV4 is BaseSwap {
         uint256 quote,
         address tokenIn,
         address tokenOut,
-        uint24 fee,
-        int24 tickSpacing,
-        address hooks
+        bytes32 poolId
     ) internal view returns (uint256 quoteOut) {
         address currency0 = v4Currency(tokenIn);
         address currency1 = v4Currency(tokenOut);
         bool zeroForOne = currency0 < currency1;
 
-        PoolKey memory poolKey = PoolKey({
-            currency0: zeroForOne ? currency0 : currency1,
-            currency1: zeroForOne ? currency1 : currency0,
-            fee: fee,
-            tickSpacing: tickSpacing,
-            hooks: hooks
-        });
-
-        (uint160 sqrtPriceX96, int24 tick, , ) = stateView.getSlot0(computePoolId(poolKey));
+        (uint160 sqrtPriceX96, int24 tick, , ) = stateView.getSlot0(poolId);
         uint160 sqrtPrice = zeroForOne ? sqrtPriceX96 : TickMath.getSqrtRatioAtTick(-tick);
         quoteOut = quote.mul(sqrtPrice) >> 96;
         quoteOut = quoteOut.mul(sqrtPrice) >> 96;
@@ -661,24 +664,14 @@ contract UniSwapV4 is BaseSwap {
         return token == address(ETH_TOKEN_ADDRESS) ? address(0) : token;
     }
 
-    /// @dev PoolId = keccak256(abi.encode(PoolKey)), matching V4 PoolIdLibrary.toId().
-    function computePoolId(PoolKey memory key) internal pure returns (bytes32) {
-        return keccak256(abi.encode(key));
-    }
-
-    /// @dev Parses extraArgs: <[20B] router><[20B] stateView><per hop: [3B] fee | [3B] tickSpacing | [20B] hooks>
-    function parseExtraArgs(
-        uint256 hopCount,
-        bytes calldata extraArgs
-    )
+    /// @dev Parses extraArgs: <[20B] router><[20B] stateView><per hop: [32B] poolId>
+    function parseExtraArgs(uint256 hopCount, bytes calldata extraArgs)
         internal
         view
         returns (
             IUniversalRouterV4 router,
             IStateView stateView,
-            uint24[] memory fees,
-            int24[] memory tickSpacings,
-            address[] memory hooks
+            bytes32[] memory poolIds
         )
     {
         router = IUniversalRouterV4(extraArgs.toAddress(0));
@@ -686,16 +679,11 @@ contract UniSwapV4 is BaseSwap {
         require(address(router) != address(0), "invalid router");
         require(uniRouters.contains(address(router)), "unsupported router");
 
-        fees = new uint24[](hopCount);
-        tickSpacings = new int24[](hopCount);
-        hooks = new address[](hopCount);
+        poolIds = new bytes32[](hopCount);
 
-        // Header is 40 bytes; each hop is 3 + 3 + 20 = 26 bytes
+        // Header is 40 bytes; each hop is 32 bytes (poolId)
         for (uint256 i = 0; i < hopCount; i++) {
-            uint256 offset = 40 + i * 26;
-            fees[i] = extraArgs.toUint24(offset);
-            tickSpacings[i] = int24(extraArgs.toUint24(offset + 3));
-            hooks[i] = extraArgs.toAddress(offset + 6);
+            poolIds[i] = bytes32(extraArgs.toUint256(40 + i * 32));
         }
     }
 }
