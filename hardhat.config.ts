@@ -158,9 +158,14 @@ const config: HardhatUserConfig = {
 };
 
 if (MAINNET_FORK) {
+  const forkChainId = parseInt(MAINNET_ID || '') || undefined;
   config.networks!.hardhat = {
     accounts: accounts,
-    chainId: parseInt(MAINNET_ID || '') || undefined,
+    chainId: forkChainId,
+    hardfork: 'cancun',
+    // Tell EDR to use Cancun for any non-mainnet chain (e.g. Base chainId=8453)
+    // without this, EDR reverts with "No known hardfork for execution on historical block"
+    chains: forkChainId && forkChainId !== 1 ? {[forkChainId]: {hardforkHistory: {cancun: 0}}} : undefined,
     forking: {
       url: MAINNET_FORK,
       blockNumber: parseInt(MAINNET_FORK_BLOCK || '') || undefined,

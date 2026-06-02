@@ -39,12 +39,6 @@ interface IStateView {
         external
         view
         returns (uint128 liquidityGross, int128 liquidityNet);
-
-    /// @notice Returns the tick spacing for a V4 pool
-    function getTickSpacing(bytes32 poolId) external view returns (int24 tickSpacing);
-
-    /// @notice Returns the hooks address for a V4 pool
-    function getHooks(bytes32 poolId) external view returns (address hooks);
 }
 
 /// @dev Minimal Universal Router interface for V4 swaps
@@ -57,6 +51,20 @@ interface IUniversalRouterV4 {
         bytes[] calldata inputs,
         uint256 deadline
     ) external payable;
+}
+
+/// @dev Uniswap V4 PositionManager — stores full PoolKey indexed by truncated poolId (first 25 bytes)
+interface INFPM {
+    function poolKeys(bytes25 poolId)
+        external
+        view
+        returns (
+            address currency0,
+            address currency1,
+            uint24 fee,
+            int24 tickSpacing,
+            address hooks
+        );
 }
 
 /// @dev PoolKey uniquely identifies a V4 pool; currency0 < currency1 by address ordering
@@ -124,6 +132,7 @@ library TickBitmapV4 {
 /// extraArgs encoding (per trade):
 ///   [20B] Universal Router address
 ///   [20B] StateView address
+///   [20B] NFPM address
 ///   per hop: [32B] bytes32 poolId (keccak256 of PoolKey)
 contract UniSwapV4 is BaseSwap {
     using SafeERC20 for IERC20Ext;
@@ -140,11 +149,11 @@ contract UniSwapV4 is BaseSwap {
     uint8 private constant COMMAND_V4_SWAP = 0x10;
 
     // ── V4Router action bytes (packed inside V4_SWAP input) ─────────────────
-    // Source: Actions.sol in Uniswap v4-periphery
-    uint8 private constant ACTION_SWAP_EXACT_IN_SINGLE = 0x00;
-    uint8 private constant ACTION_SWAP_EXACT_IN = 0x01;
-    uint8 private constant ACTION_SETTLE_ALL = 0x0a;
-    uint8 private constant ACTION_TAKE_ALL = 0x0d;
+    // Source: Actions.sol in Uniswap v4-periphery (v1.0+)
+    uint8 private constant ACTION_SWAP_EXACT_IN_SINGLE = 0x06;
+    uint8 private constant ACTION_SWAP_EXACT_IN = 0x07;
+    uint8 private constant ACTION_SETTLE = 0x0b;
+    uint8 private constant ACTION_TAKE_ALL = 0x0f;
 
     EnumerableSet.AddressSet private uniRouters;
 
@@ -214,7 +223,7 @@ contract UniSwapV4 is BaseSwap {
     {
         require(params.tradePath.length >= 2, "invalid tradePath");
         uint256 hopCount = params.tradePath.length - 1;
-        (, IStateView stateView, bytes32[] memory poolIds) = parseExtraArgs(
+        (, IStateView stateView, INFPM nfpm, bytes32[] memory poolIds) = parseExtraArgs(
             hopCount,
             params.extraArgs
         );
@@ -223,6 +232,7 @@ contract UniSwapV4 is BaseSwap {
         for (uint256 i = 0; i < hopCount; i++) {
             destAmount = getAmountOut(
                 stateView,
+                nfpm,
                 destAmount,
                 params.tradePath[i],
                 params.tradePath[i + 1],
@@ -240,7 +250,7 @@ contract UniSwapV4 is BaseSwap {
     {
         require(params.tradePath.length >= 2, "invalid tradePath");
         uint256 hopCount = params.tradePath.length - 1;
-        (, IStateView stateView, bytes32[] memory poolIds) = parseExtraArgs(
+        (, IStateView stateView, INFPM nfpm, bytes32[] memory poolIds) = parseExtraArgs(
             hopCount,
             params.extraArgs
         );
@@ -250,6 +260,7 @@ contract UniSwapV4 is BaseSwap {
         for (uint256 i = 0; i < hopCount; i++) {
             destAmount = getAmountOut(
                 stateView,
+                nfpm,
                 destAmount,
                 params.tradePath[i],
                 params.tradePath[i + 1],
@@ -275,7 +286,7 @@ contract UniSwapV4 is BaseSwap {
     {
         require(params.tradePath.length >= 2, "invalid tradePath");
         uint256 hopCount = params.tradePath.length - 1;
-        (, IStateView stateView, bytes32[] memory poolIds) = parseExtraArgs(
+        (, IStateView stateView, INFPM nfpm, bytes32[] memory poolIds) = parseExtraArgs(
             hopCount,
             params.extraArgs
         );
@@ -284,6 +295,7 @@ contract UniSwapV4 is BaseSwap {
         for (uint256 i = params.tradePath.length - 1; i > 0; i--) {
             srcAmount = getAmountIn(
                 stateView,
+                nfpm,
                 srcAmount,
                 params.tradePath[i - 1],
                 params.tradePath[i],
@@ -301,7 +313,7 @@ contract UniSwapV4 is BaseSwap {
     {
         require(params.tradePath.length >= 2, "invalid tradePath");
         uint256 hopCount = params.tradePath.length - 1;
-        (, IStateView stateView, bytes32[] memory poolIds) = parseExtraArgs(
+        (, IStateView stateView, INFPM nfpm, bytes32[] memory poolIds) = parseExtraArgs(
             hopCount,
             params.extraArgs
         );
@@ -310,6 +322,7 @@ contract UniSwapV4 is BaseSwap {
         for (uint256 i = params.tradePath.length - 1; i > 0; i--) {
             srcAmount = getAmountIn(
                 stateView,
+                nfpm,
                 srcAmount,
                 params.tradePath[i - 1],
                 params.tradePath[i],
@@ -343,34 +356,60 @@ contract UniSwapV4 is BaseSwap {
         returns (uint256 destAmount)
     {
         require(params.tradePath.length >= 2, "invalid tradePath");
-        uint256 hopCount = params.tradePath.length - 1;
         (
             IUniversalRouterV4 router,
             IStateView stateView,
+            INFPM nfpm,
             bytes32[] memory poolIds
-        ) = parseExtraArgs(hopCount, params.extraArgs);
+        ) = parseExtraArgs(params.tradePath.length - 1, params.extraArgs);
 
-        address inputToken = params.tradePath[0];
-        address outputToken = params.tradePath[params.tradePath.length - 1];
-        bool inputIsETH = inputToken == address(ETH_TOKEN_ADDRESS);
-        bool outputIsETH = outputToken == address(ETH_TOKEN_ADDRESS);
+        bool inputIsETH = params.tradePath[0] == address(ETH_TOKEN_ADDRESS);
+        bool outputIsETH = params.tradePath[params.tradePath.length - 1] ==
+            address(ETH_TOKEN_ADDRESS);
 
-        // Transfer input tokens to the Universal Router before calling execute().
-        // For ERC20: our contract already holds the tokens (sent by proxy).
-        // For ETH: we forward msg.value with the execute() call.
         if (!inputIsETH) {
-            IERC20Ext(inputToken).safeTransfer(address(router), params.srcAmount);
+            IERC20Ext(params.tradePath[0]).safeTransfer(address(router), params.srcAmount);
         }
 
-        // Snapshot our own balance of the output token; TAKE_ALL sends output here.
+        destAmount = _doSwapAndMeasure(
+            router,
+            stateView,
+            nfpm,
+            params,
+            poolIds,
+            inputIsETH,
+            outputIsETH
+        );
+
+        if (outputIsETH) {
+            payable(params.recipient).transfer(destAmount);
+        } else {
+            IERC20Ext(params.tradePath[params.tradePath.length - 1]).safeTransfer(
+                params.recipient,
+                destAmount
+            );
+        }
+    }
+
+    function _doSwapAndMeasure(
+        IUniversalRouterV4 router,
+        IStateView stateView,
+        INFPM nfpm,
+        SwapParams calldata params,
+        bytes32[] memory poolIds,
+        bool inputIsETH,
+        bool outputIsETH
+    ) private returns (uint256 delta) {
+        address outputToken = params.tradePath[params.tradePath.length - 1];
         uint256 balanceBefore = outputIsETH
             ? address(this).balance
             : IERC20Ext(outputToken).balanceOf(address(this));
 
-        if (hopCount == 1) {
+        if (params.tradePath.length == 2) {
             swapExactInputSingle(
                 router,
                 stateView,
+                nfpm,
                 params.srcAmount,
                 params.minDestAmount,
                 params.tradePath,
@@ -381,6 +420,7 @@ contract UniSwapV4 is BaseSwap {
             swapExactInput(
                 router,
                 stateView,
+                nfpm,
                 params.srcAmount,
                 params.minDestAmount,
                 params.tradePath,
@@ -392,29 +432,21 @@ contract UniSwapV4 is BaseSwap {
         uint256 balanceAfter = outputIsETH
             ? address(this).balance
             : IERC20Ext(outputToken).balanceOf(address(this));
-
-        destAmount = balanceAfter.sub(balanceBefore);
-
-        // Forward output to recipient.
-        if (outputIsETH) {
-            payable(params.recipient).transfer(destAmount);
-        } else {
-            IERC20Ext(outputToken).safeTransfer(params.recipient, destAmount);
-        }
+        delta = balanceAfter.sub(balanceBefore);
     }
 
     // ── Internal swap builders ────────────────────────────────────────────────
 
     function _buildPoolKey(
         IStateView stateView,
+        INFPM nfpm,
         bytes32 poolId,
         address currency0,
         address currency1,
         bool zeroForOne
     ) internal view returns (PoolKey memory) {
         (, , , uint24 fee) = stateView.getSlot0(poolId);
-        int24 tickSpacing = stateView.getTickSpacing(poolId);
-        address hooks = stateView.getHooks(poolId);
+        (, , , int24 tickSpacing, address hooks) = nfpm.poolKeys(bytes25(poolId));
         return
             PoolKey({
                 currency0: zeroForOne ? currency0 : currency1,
@@ -428,6 +460,7 @@ contract UniSwapV4 is BaseSwap {
     function swapExactInputSingle(
         IUniversalRouterV4 router,
         IStateView stateView,
+        INFPM nfpm,
         uint256 srcAmount,
         uint256 minDestAmount,
         address[] calldata tradePath,
@@ -440,32 +473,34 @@ contract UniSwapV4 is BaseSwap {
 
         PoolKey memory poolKey = _buildPoolKey(
             stateView,
+            nfpm,
             poolId,
             currency0,
             currency1,
             zeroForOne
         );
 
-        // actions: SWAP_EXACT_IN_SINGLE | SETTLE_ALL | TAKE_ALL
+        // actions: SWAP_EXACT_IN_SINGLE | SETTLE | TAKE_ALL
         bytes memory actions = abi.encodePacked(
             ACTION_SWAP_EXACT_IN_SINGLE,
-            ACTION_SETTLE_ALL,
+            ACTION_SETTLE,
             ACTION_TAKE_ALL
         );
 
         bytes[] memory actionParams = new bytes[](3);
-        // SWAP_EXACT_IN_SINGLE params
+        // SWAP_EXACT_IN_SINGLE params: ExactInputSingleParams
         actionParams[0] = abi.encode(
             poolKey,
             zeroForOne,
             uint128(srcAmount),
             uint128(minDestAmount),
-            bytes("")
+            uint256(0), // minHopPriceX36 — no price limit
+            bytes("") // hookData
         );
-        // SETTLE_ALL params: (currency, maxAmount)
-        actionParams[1] = abi.encode(currency0 < currency1 ? currency0 : currency1, srcAmount);
-        // TAKE_ALL params: (currency, minAmount) — output is sent to msgSender (this contract)
-        actionParams[2] = abi.encode(zeroForOne ? currency1 : currency0, minDestAmount);
+        // SETTLE params: (currency, amount, payerIsUser=false) — settle from router's own balance
+        actionParams[1] = abi.encode(currency0, srcAmount, false);
+        // TAKE_ALL params: (currency, minAmount) — output delivered to msgSender (this contract)
+        actionParams[2] = abi.encode(currency1, minDestAmount);
 
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(actions, actionParams);
@@ -480,6 +515,7 @@ contract UniSwapV4 is BaseSwap {
     function swapExactInput(
         IUniversalRouterV4 router,
         IStateView stateView,
+        INFPM nfpm,
         uint256 srcAmount,
         uint256 minDestAmount,
         address[] calldata tradePath,
@@ -492,8 +528,7 @@ contract UniSwapV4 is BaseSwap {
         PathKey[] memory path = new PathKey[](poolIds.length);
         for (uint256 i = 0; i < poolIds.length; i++) {
             (, , , uint24 fee) = stateView.getSlot0(poolIds[i]);
-            int24 tickSpacing = stateView.getTickSpacing(poolIds[i]);
-            address hooks = stateView.getHooks(poolIds[i]);
+            (, , , int24 tickSpacing, address hooks) = nfpm.poolKeys(bytes25(poolIds[i]));
             path[i] = PathKey({
                 intermediateCurrency: v4Currency(tradePath[i + 1]),
                 fee: fee,
@@ -505,15 +540,22 @@ contract UniSwapV4 is BaseSwap {
 
         bytes memory actions = abi.encodePacked(
             ACTION_SWAP_EXACT_IN,
-            ACTION_SETTLE_ALL,
+            ACTION_SETTLE,
             ACTION_TAKE_ALL
         );
 
+        uint256[] memory minHopPrices = new uint256[](poolIds.length); // all zeros — no hop price limits
         bytes[] memory actionParams = new bytes[](3);
-        // SWAP_EXACT_IN params: (currencyIn, PathKey[], amountIn, amountOutMinimum)
-        actionParams[0] = abi.encode(currencyIn, path, uint128(srcAmount), uint128(minDestAmount));
-        // SETTLE_ALL params: (currency, maxAmount)
-        actionParams[1] = abi.encode(currencyIn, srcAmount);
+        // SWAP_EXACT_IN params: ExactInputParams (currencyIn, PathKey[], minHopPriceX36[], amountIn, amountOutMinimum)
+        actionParams[0] = abi.encode(
+            currencyIn,
+            path,
+            minHopPrices,
+            uint128(srcAmount),
+            uint128(minDestAmount)
+        );
+        // SETTLE params: (currency, amount, payerIsUser=false) — settle from router's own balance
+        actionParams[1] = abi.encode(currencyIn, srcAmount, false);
         // TAKE_ALL params: (currency, minAmount)
         actionParams[2] = abi.encode(currencyOut, minDestAmount);
 
@@ -531,28 +573,31 @@ contract UniSwapV4 is BaseSwap {
 
     function getAmountOut(
         IStateView stateView,
+        INFPM nfpm,
         uint256 amountIn,
         address tokenIn,
         address tokenOut,
         bytes32 poolId
     ) private view returns (uint256) {
-        return getAmount(stateView, amountIn.toInt256(), tokenIn, tokenOut, poolId);
+        return getAmount(stateView, nfpm, amountIn.toInt256(), tokenIn, tokenOut, poolId);
     }
 
     function getAmountIn(
         IStateView stateView,
+        INFPM nfpm,
         uint256 amountOut,
         address tokenIn,
         address tokenOut,
         bytes32 poolId
     ) private view returns (uint256) {
-        return getAmount(stateView, -amountOut.toInt256(), tokenIn, tokenOut, poolId);
+        return getAmount(stateView, nfpm, -amountOut.toInt256(), tokenIn, tokenOut, poolId);
     }
 
     /// @dev Simulates the V4 AMM swap step-by-step using StateView.
     ///      The concentrated-liquidity math is identical to V3.
     function getAmount(
         IStateView stateView,
+        INFPM nfpm,
         int256 amountSpecified,
         address tokenIn,
         address tokenOut,
@@ -564,7 +609,7 @@ contract UniSwapV4 is BaseSwap {
             address currency1 = v4Currency(tokenOut);
             cfg.zeroForOne = currency0 < currency1;
         }
-        cfg.tickSpacing = stateView.getTickSpacing(poolId);
+        (, , , cfg.tickSpacing, ) = nfpm.poolKeys(bytes25(poolId));
         cfg.sqrtPriceLimitX96 = cfg.zeroForOne
             ? TickMath.MIN_SQRT_RATIO + 1
             : TickMath.MAX_SQRT_RATIO - 1;
@@ -664,26 +709,28 @@ contract UniSwapV4 is BaseSwap {
         return token == address(ETH_TOKEN_ADDRESS) ? address(0) : token;
     }
 
-    /// @dev Parses extraArgs: <[20B] router><[20B] stateView><per hop: [32B] poolId>
+    /// @dev Parses extraArgs: <[20B] router><[20B] stateView><[20B] nfpm><per hop: [32B] poolId>
     function parseExtraArgs(uint256 hopCount, bytes calldata extraArgs)
         internal
         view
         returns (
             IUniversalRouterV4 router,
             IStateView stateView,
+            INFPM nfpm,
             bytes32[] memory poolIds
         )
     {
         router = IUniversalRouterV4(extraArgs.toAddress(0));
         stateView = IStateView(extraArgs.toAddress(20));
+        nfpm = INFPM(extraArgs.toAddress(40));
         require(address(router) != address(0), "invalid router");
         require(uniRouters.contains(address(router)), "unsupported router");
 
         poolIds = new bytes32[](hopCount);
 
-        // Header is 40 bytes; each hop is 32 bytes (poolId)
+        // Header is 60 bytes; each hop is 32 bytes (poolId)
         for (uint256 i = 0; i < hopCount; i++) {
-            poolIds[i] = bytes32(extraArgs.toUint256(40 + i * 32));
+            poolIds[i] = bytes32(extraArgs.toUint256(60 + i * 32));
         }
     }
 }

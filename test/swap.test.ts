@@ -25,7 +25,7 @@ import {
   SmartWalletProxy,
 } from '../typechain';
 import {ethers} from 'hardhat';
-import {arrayify, hexConcat, hexlify} from 'ethers/lib/utils';
+import {arrayify, defaultAbiCoder, hexConcat, hexlify, keccak256} from 'ethers/lib/utils';
 import axios from 'axios';
 import {apiMock} from './api_helper';
 
@@ -389,10 +389,63 @@ describe('swap test', async () => {
 
   before(async () => {
     setup = await getInitialSetup();
+    console.log('\n\n\n=== Initial setup done ===');
   });
 
   // Need at least 1 test to be recognized as the test suite
   it('swap test should be initialized', async () => {});
+
+  if (networkSetting.uniswapV4) {
+    const v2RouterAddress = Object.values(networkSetting.uniswap!.routers)[0].address;
+    for (let router of networkSetting.uniswapV4.routers) {
+      executeSwapTest({
+        name: 'uniV4',
+        getSwapContract: async () => {
+          return setup.krystalContracts.swapContracts!.uniSwapV4!.address;
+        },
+        router,
+        generateArgsFunc: async (tradePath: string[]) => {
+          const stateView = networkSetting.uniswapV4!.stateView;
+          // extraArgs: <router 20B><stateView 20B> then per hop: <poolId 32B>
+          // poolId = keccak256(abi.encode(currency0, currency1, fee, tickSpacing, hooks))
+          // V4 uses address(0) for native ETH; currency0 < currency1 by address ordering
+          let extraArgs =
+            hexlify(arrayify(router)) + arrayify(stateView).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '');
+          const wNativeLower = networkSetting.wNative.toLowerCase();
+          const toV4Currency = (addr: string) =>
+            addr.toLowerCase() === nativeTokenAddress.toLowerCase() || addr.toLowerCase() === wNativeLower
+              ? ethers.constants.AddressZero
+              : addr;
+          for (let i = 0; i < tradePath.length - 1; i++) {
+            const c0raw = toV4Currency(tradePath[i]);
+            const c1raw = toV4Currency(tradePath[i + 1]);
+            const [c0, c1] = c0raw.toLowerCase() < c1raw.toLowerCase() ? [c0raw, c1raw] : [c1raw, c0raw];
+            const poolId = keccak256(
+              defaultAbiCoder.encode(
+                ['address', 'address', 'uint24', 'int24', 'address'],
+                [c0, c1, 3000, 60, ethers.constants.AddressZero]
+              )
+            );
+            extraArgs = extraArgs + poolId.slice(2); // 32 bytes, strip 0x
+          }
+          return extraArgs;
+        },
+        platformFee,
+        getActualRate: async (sourceAmount: BigNumber, tradePath: string[], feeMode: FeeMode) => {
+          const routerContractV2 = (await ethers.getContractAt(
+            'IUniswapV2Router02',
+            v2RouterAddress
+          )) as IUniswapV2Router02;
+          const amounts = await routerContractV2.getAmountsOut(sourceAmount, tradePath);
+          return amounts[amounts.length - 1];
+        },
+        maxDiffAllowed: 2,
+        getExpectedInSupported: true,
+        testingTokens: networkSetting.uniswapV4.testingTokens ?? Object.keys(networkSetting.tokens),
+        expectedPriceImpactFn: null,
+      });
+    }
+  }
 
   if (networkSetting.uniswap) {
     for (let [routerName, {address, testingTokens}] of Object.entries(networkSetting.uniswap.routers)) {
@@ -469,46 +522,6 @@ describe('swap test', async () => {
         maxDiffAllowed: 1,
         getExpectedInSupported: true,
         testingTokens: networkSetting.uniswapV3.testingTokens ?? Object.keys(networkSetting.tokens),
-        expectedPriceImpactFn: null,
-      });
-    }
-  }
-
-  if (networkSetting.uniswapV4) {
-    for (let router of networkSetting.uniswapV4.routers) {
-      // Use V2 router as a rough price reference (same underlying assets)
-      const routerContractV2 = (await ethers.getContractAt(
-        'IUniswapV2Router02',
-        Object.values(networkSetting.uniswap!.routers)[0].address
-      )) as IUniswapV2Router02;
-
-      executeSwapTest({
-        name: 'uniV4',
-        getSwapContract: async () => {
-          return setup.krystalContracts.swapContracts!.uniSwapV4!.address;
-        },
-        router,
-        generateArgsFunc: async (tradePath: string[]) => {
-          const stateView = networkSetting.uniswapV4!.stateView;
-          // extraArgs: <router 20B><stateView 20B> then per hop: <fee 3B><tickSpacing 3B><hooks 20B>
-          // Default: fee=3000 (0x0BB8), tickSpacing=60 (0x00003C), no hooks (address(0))
-          let extraArgs =
-            hexlify(arrayify(router)) + arrayify(stateView).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '');
-          for (let i = 0; i < tradePath.length - 1; i++) {
-            extraArgs = extraArgs + '000BB8'; // fee = 3000
-            extraArgs = extraArgs + '00003C'; // tickSpacing = 60
-            extraArgs = extraArgs + '0000000000000000000000000000000000000000'; // no hooks
-          }
-          return extraArgs;
-        },
-        platformFee,
-        getActualRate: async (sourceAmount: BigNumber, tradePath: string[], feeMode: FeeMode) => {
-          const amounts = await routerContractV2.getAmountsOut(sourceAmount, tradePath);
-          return amounts[amounts.length - 1];
-        },
-        maxDiffAllowed: 2, // allow slightly more diff since V4 fee tiers may differ from V2
-        getExpectedInSupported: true,
-        testingTokens: networkSetting.uniswapV4.testingTokens ?? Object.keys(networkSetting.tokens),
         expectedPriceImpactFn: null,
       });
     }
