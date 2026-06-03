@@ -4,7 +4,7 @@ pragma experimental ABIEncoderV2;
 
 import "./BaseSwap.sol";
 import "../libraries/BytesLib.sol";
-import "../libraries/PoolAddressHyperEvm.sol";
+import "../libraries/PoolAddressProjectX.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/utils/EnumerableSet.sol";
@@ -416,9 +416,9 @@ contract ProjectXV3 is BaseSwap {
         uint24 fee
     ) private view returns (uint256 amountOut) {
         IUniswapV3Pool pool = IUniswapV3Pool(
-            PoolAddressHyperEvm.computeAddress(
+            PoolAddressProjectX.computeAddress(
                 router.factory(),
-                PoolAddressHyperEvm.getPoolKey(tokenIn, tokenOut, fee)
+                PoolAddressProjectX.getPoolKey(tokenIn, tokenOut, fee)
             )
         );
 

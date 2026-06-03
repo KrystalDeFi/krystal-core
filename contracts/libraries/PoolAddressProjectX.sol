@@ -3,7 +3,7 @@ pragma solidity >=0.5.0;
 
 /// @title Provides functions for deriving a pool address from the factory, tokens, and the fee
 /// @dev Uses ProjectX (HyperEVM) pool init code hash instead of canonical Uniswap V3 hash
-library PoolAddressHyperEvm {
+library PoolAddressProjectX {
     bytes32 internal constant POOL_INIT_CODE_HASH =
         0x7ef2b01a451cbf890790278981756372e549443802ece149dc0b592cbc114ee9;
 
