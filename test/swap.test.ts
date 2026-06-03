@@ -437,7 +437,6 @@ describe('swap test', async () => {
   }
 
   if (networkSetting.uniswapV3) {
-    console.log('Testing uniswapV3 routers: ', networkSetting.uniswapV3.routers);
     for (let router of networkSetting.uniswapV3.routers) {
       executeSwapTest({
         name: 'uniV3',
