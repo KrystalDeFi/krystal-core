@@ -45,6 +45,11 @@ export interface IConfig {
     testingTokens?: string[];
   };
 
+  projectXV3?: {
+    routers: string[];
+    testingTokens?: string[];
+  };
+
   kyberProxy?: {
     proxy: string;
     testingTokens?: string[];
