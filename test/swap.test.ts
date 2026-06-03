@@ -119,6 +119,9 @@ describe('swap test', async () => {
         return BigNumber.from(100);
       }
       const extraArgs = await generateArgsFunc(tradePath, srcAmount, feeMode);
+      console.log(
+        `testing getExpectedRate for ${name} with router ${router}, srcAmount: ${srcAmount.toString()}, tradePath: ${tradePath}, feeMode: ${feeMode}, extraArgs: ${extraArgs}`
+      );
       const data = await setup.proxyInstance.getExpectedReturn({
         swapContract,
         srcAmount,
@@ -419,7 +422,6 @@ describe('swap test', async () => {
           let amountsOut = await routerContract.getAmountsOut(srcAmount, tradePath);
           let amountOut = amountsOut[amountsOut.length - 1];
           let quote = srcAmount;
-          let reserve1: BigNumber;
           for (let i = 0; i < tradePath.length - 1; i++) {
             const pair = await factoryContract.getPair(tradePath[i], tradePath[i + 1]);
             const pairContract = (await ethers.getContractAt('IUniswapV2Pair', pair)) as IUniswapV2Pair;
@@ -428,7 +430,6 @@ describe('swap test', async () => {
             if (token0.toLowerCase() !== tradePath[i].toLowerCase()) {
               [r0, r1] = [r1, r0];
             }
-            reserve1 = r1;
 
             quote = quote.mul(997).mul(r1).div(r0).div(1000);
           }
@@ -439,15 +440,8 @@ describe('swap test', async () => {
   }
 
   if (networkSetting.uniswapV3) {
+    console.log('Testing uniswapV3 routers: ', networkSetting.uniswapV3.routers);
     for (let router of networkSetting.uniswapV3.routers) {
-      // Using v2 router as a price estimate for testing
-      const routerContractV2 = (await ethers.getContractAt(
-        'IUniswapV2Router02',
-        Object.values(networkSetting.uniswap!.routers)[0].address
-      )) as IUniswapV2Router02;
-      const routerContractV3 = (await ethers.getContractAt('ISwapRouterInternal', router)) as ISwapRouterInternal;
-      const factoryAddr = await routerContractV3.factory();
-      const factory = (await ethers.getContractAt('IUniswapV3Factory', factoryAddr)) as IUniswapV3Factory;
       executeSwapTest({
         name: 'uniV3',
         getSwapContract: async () => {
@@ -457,18 +451,77 @@ describe('swap test', async () => {
         generateArgsFunc: async (tradePath: string[]) => {
           let extraArgs = hexlify(arrayify(router));
           for (let i = 0; i < tradePath.length - 1; i++) {
-            extraArgs = extraArgs + '0001F4'; // fee = 3000 bps
+            extraArgs = extraArgs + '0001F4'; // fee = 500 (0.05%)
           }
           return extraArgs;
         },
         platformFee,
-        getActualRate: async (sourceAmount: BigNumber, tradePath: string[], feeMode: FeeMode) => {
-          const amounts = await routerContractV2.getAmountsOut(sourceAmount, tradePath);
-          return amounts[amounts.length - 1];
+        getActualRate: async (sourceAmount: BigNumber, tradePath: string[], _feeMode: FeeMode) => {
+          const routerContractV3 = (await ethers.getContractAt('ISwapRouterInternal', router)) as ISwapRouterInternal;
+          const factoryAddr = await routerContractV3.factory();
+          const factory = (await ethers.getContractAt('IUniswapV3Factory', factoryAddr)) as IUniswapV3Factory;
+          const Q96 = BigNumber.from(2).pow(96);
+          let amount = sourceAmount;
+          for (let i = 0; i < tradePath.length - 1; i++) {
+            const poolAddr = await factory.getPool(tradePath[i], tradePath[i + 1], 500);
+            const pool = (await ethers.getContractAt('IUniswapV3Pool', poolAddr)) as IUniswapV3Pool;
+            const {sqrtPriceX96} = await pool.slot0();
+            const token0 = await pool.token0();
+            if (tradePath[i].toLowerCase() === token0.toLowerCase()) {
+              amount = amount.mul(sqrtPriceX96).mul(sqrtPriceX96).div(Q96).div(Q96);
+            } else {
+              amount = amount.mul(Q96).mul(Q96).div(sqrtPriceX96).div(sqrtPriceX96);
+            }
+          }
+          return amount;
         },
         maxDiffAllowed: 1,
         getExpectedInSupported: true,
         testingTokens: networkSetting.uniswapV3.testingTokens ?? Object.keys(networkSetting.tokens),
+        expectedPriceImpactFn: null,
+      });
+    }
+  }
+
+  if (networkSetting.projectXV3) {
+    console.log('Testing projectXV3 routers: ', networkSetting.projectXV3.routers);
+    for (let router of networkSetting.projectXV3.routers) {
+      executeSwapTest({
+        name: 'uniV3HyperEvm',
+        getSwapContract: async () => {
+          return setup.krystalContracts.swapContracts!.projectXV3!.address;
+        },
+        router,
+        generateArgsFunc: async (tradePath: string[]) => {
+          let extraArgs = hexlify(arrayify(router));
+          for (let i = 0; i < tradePath.length - 1; i++) {
+            extraArgs = extraArgs + '0001F4'; // fee = 500 (0.05%)
+          }
+          return extraArgs;
+        },
+        platformFee,
+        getActualRate: async (sourceAmount: BigNumber, tradePath: string[], _feeMode: FeeMode) => {
+          const routerContractV3 = (await ethers.getContractAt('ISwapRouterInternal', router)) as ISwapRouterInternal;
+          const factoryAddr = await routerContractV3.factory();
+          const factory = (await ethers.getContractAt('IUniswapV3Factory', factoryAddr)) as IUniswapV3Factory;
+          const Q96 = BigNumber.from(2).pow(96);
+          let amount = sourceAmount;
+          for (let i = 0; i < tradePath.length - 1; i++) {
+            const poolAddr = await factory.getPool(tradePath[i], tradePath[i + 1], 500);
+            const pool = (await ethers.getContractAt('IUniswapV3Pool', poolAddr)) as IUniswapV3Pool;
+            const {sqrtPriceX96} = await pool.slot0();
+            const token0 = await pool.token0();
+            if (tradePath[i].toLowerCase() === token0.toLowerCase()) {
+              amount = amount.mul(sqrtPriceX96).mul(sqrtPriceX96).div(Q96).div(Q96);
+            } else {
+              amount = amount.mul(Q96).mul(Q96).div(sqrtPriceX96).div(sqrtPriceX96);
+            }
+          }
+          return amount;
+        },
+        maxDiffAllowed: 1,
+        getExpectedInSupported: true,
+        testingTokens: networkSetting.projectXV3.testingTokens ?? Object.keys(networkSetting.tokens),
         expectedPriceImpactFn: null,
       });
     }
