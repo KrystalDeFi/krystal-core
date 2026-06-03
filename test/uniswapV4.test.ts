@@ -197,8 +197,6 @@ describe('UniSwapV4 — unit tests (Base mainnet fork)', async () => {
     });
   });
 
-  return;
-
   // ── getExpectedIn ──────────────────────────────────────────────────────────
 
   describe('getExpectedIn', () => {

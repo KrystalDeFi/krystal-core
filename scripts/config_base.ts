@@ -17,7 +17,6 @@ export const BaseConfig: Record<string, IConfig> = {
     },
     //remember to check if this compatible w/ weth that dex used
     wNative: '0x4200000000000000000000000000000000000006',
-    native: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
 
     uniSwapV3Bsc: {
       routers: [
@@ -26,14 +25,14 @@ export const BaseConfig: Record<string, IConfig> = {
       // testingTokens: ['dai', 'usdt', 'usdc'],
     },
 
-    // kyberSwapV3: {
-    //   router: '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5',
-    // },
+    kyberSwapV3: {
+      router: '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5',
+    },
 
-    // okx: {
-    //   router: '0x6b2c0c7be2048daa9b5527982c29f48062b34d58',
-    //   okxTokenApprove: '0x57df6092665eb6058DE53939612413ff4B09114E',
-    // },
+    okx: {
+      router: '0x6b2c0c7be2048daa9b5527982c29f48062b34d58',
+      okxTokenApprove: '0x57df6092665eb6058DE53939612413ff4B09114E',
+    },
 
     uniswapV4: {
       routers: ['0xFdf682F51FE81Aa4898F0AE2163d8A55c127fbC7'],
