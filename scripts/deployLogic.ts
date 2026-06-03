@@ -21,6 +21,7 @@ import {
   KyberSwapV3,
   Velodrome,
   UniSwapV3Bsc,
+  ProjectXV3,
   OpenOcean,
   Okx,
   UniSwapV4,
@@ -59,6 +60,7 @@ export interface KrystalContracts {
     kyberSwapV3?: KyberSwapV3;
     velodrome?: Velodrome;
     uniSwapV3Bsc?: UniSwapV3Bsc;
+    projectXV3?: ProjectXV3;
     openOcean?: OpenOcean;
     okx?: Okx;
     uniSwapV4?: UniSwapV4;
@@ -252,6 +254,17 @@ async function deployContracts(
             contractAdmin,
             networkConfig.uniSwapV3Bsc.routers
           )) as UniSwapV3Bsc),
+      projectXV3: !networkConfig.projectXV3
+        ? undefined
+        : ((await deployContract(
+            ++step,
+            networkConfig.autoVerifyContract,
+            'ProjectXV3',
+            existingContract?.['swapContracts']?.['projectXV3'],
+            undefined,
+            contractAdmin,
+            networkConfig.projectXV3.routers
+          )) as ProjectXV3),
       kyberProxy: !networkConfig.kyberProxy
         ? undefined
         : ((await deployContract(
