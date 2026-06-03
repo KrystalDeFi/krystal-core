@@ -42,7 +42,7 @@ export const OptimismConfig: Record<string, IConfig> = {
     },
 
     okx: {
-      router: '0xf332761c673b59B21fF6dfa8adA44d78c12dEF09',
+      router: '0xDd5E9B947c99Aa60bab00ca4631Dce63b49983E7',
       okxTokenApprove: '0x68D6B739D2020067D1e2F713b999dA97E4d54812',
     },
 

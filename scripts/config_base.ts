@@ -30,13 +30,12 @@ export const BaseConfig: Record<string, IConfig> = {
     },
 
     okx: {
-      router: '0x6b2c0c7be2048daa9b5527982c29f48062b34d58',
+      router: '0xC8F6b8Ba0DC0f175B568B99440B0867F69A29265',
       okxTokenApprove: '0x57df6092665eb6058DE53939612413ff4B09114E',
     },
 
     uniswapV4: {
       routers: ['0xFdf682F51FE81Aa4898F0AE2163d8A55c127fbC7'],
-      stateView: '0xA3c0c9b65baD0b08107Aa264b0f3dB444b867A71',
       testingTokens: ['usdc', 'cbbtc'],
     },
 

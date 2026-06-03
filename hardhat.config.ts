@@ -329,7 +329,7 @@ if (PRIVATE_KEY) {
     chainId: 8453,
     accounts: [PRIVATE_KEY],
     timeout: 60000,
-    gasPrice: 0.0025 * 1e9,
+    gasPrice: 0.007 * 1e9,
   };
 
   config.networks!.sonic_testnet = {

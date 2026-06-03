@@ -65,7 +65,7 @@ export const PolygonConfig: Record<string, IConfig> = {
     },
 
     okx: {
-      router: '0xa748d6573aca135af68f2635be60cb80278bd855',
+      router: '0xF6E1B4b201e220FC3741bd7a75675ffEA25c02AD',
       okxTokenApprove: '0x3b86917369b83a6892f553609f3c2f439c184e31',
     },
 

@@ -96,8 +96,6 @@ export interface IConfig {
   uniswapV4?: {
     // Universal Router addresses (one per deployment)
     routers: string[];
-    // StateView contract address used for on-chain quote simulation
-    stateView: string;
     testingTokens?: string[];
   };
 
