@@ -119,9 +119,6 @@ describe('swap test', async () => {
         return BigNumber.from(100);
       }
       const extraArgs = await generateArgsFunc(tradePath, srcAmount, feeMode);
-      console.log(
-        `testing getExpectedRate for ${name} with router ${router}, srcAmount: ${srcAmount.toString()}, tradePath: ${tradePath}, feeMode: ${feeMode}, extraArgs: ${extraArgs}`
-      );
       const data = await setup.proxyInstance.getExpectedReturn({
         swapContract,
         srcAmount,
