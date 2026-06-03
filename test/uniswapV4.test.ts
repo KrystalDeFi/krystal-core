@@ -346,7 +346,7 @@ describe('UniSwapV4 — unit tests (Base mainnet fork)', async () => {
         uniSwapV4.swap(
           {
             srcAmount: ethAmountIn,
-            minDestAmount: ethers.constants.MaxUint128, // impossibly high
+            minDestAmount: ethers.constants.MaxUint256, // impossibly high
             tradePath,
             recipient: user.address,
             feeBps: 0,
