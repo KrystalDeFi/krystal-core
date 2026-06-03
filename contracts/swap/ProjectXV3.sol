@@ -507,9 +507,9 @@ contract ProjectXV3 is BaseSwap {
         uint24 fee
     ) internal view returns (uint256 quoteOut) {
         IUniswapV3Pool pool = IUniswapV3Pool(
-            PoolAddressHyperEvm.computeAddress(
+            PoolAddressProjectX.computeAddress(
                 router.factory(),
-                PoolAddressHyperEvm.getPoolKey(tokenIn, tokenOut, fee)
+                PoolAddressProjectX.getPoolKey(tokenIn, tokenOut, fee)
             )
         );
 
