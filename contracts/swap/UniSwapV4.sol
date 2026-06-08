@@ -35,7 +35,7 @@ interface IStateView {
         returns (uint256 bitmap);
 
     /// @notice Returns liquidityGross and liquidityNet for a tick in a V4 pool
-    function getTickLiquidityNet(bytes32 poolId, int24 tick)
+    function getTickLiquidity(bytes32 poolId, int24 tick)
         external
         view
         returns (uint128 liquidityGross, int128 liquidityNet);
@@ -669,7 +669,7 @@ contract UniSwapV4 is BaseSwap {
 
             if (state.sqrtPriceX96 == step.sqrtPriceNextX96) {
                 if (step.initialized) {
-                    (, int128 liquidityNet) = stateView.getTickLiquidityNet(poolId, step.tickNext);
+                    (, int128 liquidityNet) = stateView.getTickLiquidity(poolId, step.tickNext);
                     if (cfg.zeroForOne) liquidityNet = -liquidityNet;
                     state.liquidity = LiquidityMath.addDelta(state.liquidity, liquidityNet);
                 }
