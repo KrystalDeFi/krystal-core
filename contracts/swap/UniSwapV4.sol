@@ -155,6 +155,12 @@ contract UniSwapV4 is BaseSwap {
     uint8 private constant ACTION_SETTLE = 0x0b;
     uint8 private constant ACTION_TAKE_ALL = 0x0f;
 
+    // ── Dynamic-fee marker in PoolKey.fee ────────────────────────────────────
+    // Source: LPFeeLibrary.sol in Uniswap v4-core. A pool registered with this flag
+    // delegates its LP fee to a hook, which may return a different fee per swap —
+    // the quote simulator below cannot predict that without invoking the hook.
+    uint24 private constant DYNAMIC_FEE_FLAG = 0x800000;
+
     EnumerableSet.AddressSet private uniRouters;
 
     event UpdatedUniRouters(address[] routers, bool isSupported);
@@ -609,7 +615,11 @@ contract UniSwapV4 is BaseSwap {
             address currency1 = v4Currency(tokenOut);
             cfg.zeroForOne = currency0 < currency1;
         }
-        (, , , cfg.tickSpacing, ) = nfpm.poolKeys(bytes25(poolId));
+        {
+            (, , uint24 poolFee, int24 tickSpacing, ) = nfpm.poolKeys(bytes25(poolId));
+            require(poolFee != DYNAMIC_FEE_FLAG, "dynamic fee pool unsupported");
+            cfg.tickSpacing = tickSpacing;
+        }
         cfg.sqrtPriceLimitX96 = cfg.zeroForOne
             ? TickMath.MIN_SQRT_RATIO + 1
             : TickMath.MAX_SQRT_RATIO - 1;
