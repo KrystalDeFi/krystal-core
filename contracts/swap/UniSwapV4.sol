@@ -388,7 +388,8 @@ contract UniSwapV4 is BaseSwap {
         );
 
         if (outputIsETH) {
-            payable(params.recipient).transfer(destAmount);
+            (bool success, ) = params.recipient.call{value: destAmount}("");
+            require(success, "eth transfer failed");
         } else {
             IERC20Ext(params.tradePath[params.tradePath.length - 1]).safeTransfer(
                 params.recipient,
