@@ -68,7 +68,8 @@
     "swapContracts": {
       "uniSwapV3Bsc": "0x3f768398d267ace37ee18a54c4F9061fe9B2D418",
       "okx": "0x00bFDDFdB386a71E2FB1d1763e3D1f0F1FE8aF64",
-      "kyberSwapV3": "0xFd3808ac5791Bc0DECef2354c3C670F90ea7cA8d"
+      "kyberSwapV3": "0xFd3808ac5791Bc0DECef2354c3C670F90ea7cA8d",
+      "uniswapUniversalRouter": "0x6B4948E63334816614966214166E3d1F530c1862"
     },
     "lendingContracts": {}
   },
