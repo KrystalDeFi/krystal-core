@@ -617,7 +617,12 @@ contract UniSwapV4 is BaseSwap {
         SwapState memory state;
         state.amountSpecifiedRemaining = amountSpecified;
         state.amountCalculated = 0;
-        (state.sqrtPriceX96, state.tick, , cfg.fee) = stateView.getSlot0(poolId);
+        {
+            uint24 protocolFee;
+            uint24 lpFee;
+            (state.sqrtPriceX96, state.tick, protocolFee, lpFee) = stateView.getSlot0(poolId);
+            cfg.fee = combinedSwapFee(protocolFee, cfg.zeroForOne, lpFee);
+        }
         state.liquidity = stateView.getLiquidity(poolId);
         cfg.exactInput = amountSpecified > 0;
 
@@ -682,6 +687,23 @@ contract UniSwapV4 is BaseSwap {
         amount = state.amountCalculated < 0
             ? uint256(-state.amountCalculated)
             : uint256(state.amountCalculated);
+    }
+
+    /// @dev Combines the direction-specific protocol fee with the LP fee, mirroring
+    ///      v4-core's ProtocolFeeLibrary (getZeroForOneFee/getOneForZeroFee + calculateSwapFee).
+    ///      protocolFee packs two 12-bit pips values: bits [0:12) for zeroForOne, [12:24) for oneForZero.
+    ///      The combined swap fee is applied once in SwapMath.computeSwapStep, same as v4-core's
+    ///      Pool.swap — the protocol/LP split only affects internal fee accounting, not the
+    ///      swapper-realized amountIn/amountOut.
+    function combinedSwapFee(
+        uint24 protocolFee,
+        bool zeroForOne,
+        uint24 lpFee
+    ) private pure returns (uint24) {
+        uint256 directionalProtocolFee = zeroForOne ? protocolFee & 0xfff : protocolFee >> 12;
+        if (directionalProtocolFee == 0) return lpFee;
+        uint256 numerator = directionalProtocolFee * uint256(lpFee);
+        return uint24(directionalProtocolFee + lpFee - numerator / 1_000_000);
     }
 
     /// @dev Spot-price quote (no slippage) used to compute price impact.
