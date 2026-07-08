@@ -362,12 +362,10 @@ contract UniSwapV4 is BaseSwap {
         returns (uint256 destAmount)
     {
         require(params.tradePath.length >= 2, "invalid tradePath");
-        (
-            IUniversalRouterV4 router,
-            IStateView stateView,
-            INFPM nfpm,
-            bytes32[] memory poolIds
-        ) = parseExtraArgs(params.tradePath.length - 1, params.extraArgs);
+        (IUniversalRouterV4 router, , INFPM nfpm, bytes32[] memory poolIds) = parseExtraArgs(
+            params.tradePath.length - 1,
+            params.extraArgs
+        );
 
         bool inputIsETH = params.tradePath[0] == address(ETH_TOKEN_ADDRESS);
         bool outputIsETH = params.tradePath[params.tradePath.length - 1] ==
@@ -377,15 +375,7 @@ contract UniSwapV4 is BaseSwap {
             IERC20Ext(params.tradePath[0]).safeTransfer(address(router), params.srcAmount);
         }
 
-        destAmount = _doSwapAndMeasure(
-            router,
-            stateView,
-            nfpm,
-            params,
-            poolIds,
-            inputIsETH,
-            outputIsETH
-        );
+        destAmount = _doSwapAndMeasure(router, nfpm, params, poolIds, inputIsETH, outputIsETH);
 
         if (outputIsETH) {
             (bool success, ) = params.recipient.call{value: destAmount}("");
@@ -400,7 +390,6 @@ contract UniSwapV4 is BaseSwap {
 
     function _doSwapAndMeasure(
         IUniversalRouterV4 router,
-        IStateView stateView,
         INFPM nfpm,
         SwapParams calldata params,
         bytes32[] memory poolIds,
@@ -415,7 +404,6 @@ contract UniSwapV4 is BaseSwap {
         if (params.tradePath.length == 2) {
             swapExactInputSingle(
                 router,
-                stateView,
                 nfpm,
                 params.srcAmount,
                 params.minDestAmount,
@@ -426,7 +414,6 @@ contract UniSwapV4 is BaseSwap {
         } else {
             swapExactInput(
                 router,
-                stateView,
                 nfpm,
                 params.srcAmount,
                 params.minDestAmount,
@@ -445,15 +432,14 @@ contract UniSwapV4 is BaseSwap {
     // ── Internal swap builders ────────────────────────────────────────────────
 
     function _buildPoolKey(
-        IStateView stateView,
         INFPM nfpm,
         bytes32 poolId,
         address currency0,
         address currency1,
         bool zeroForOne
     ) internal view returns (PoolKey memory) {
-        (, , , uint24 fee) = stateView.getSlot0(poolId);
-        (, , , int24 tickSpacing, address hooks) = nfpm.poolKeys(bytes25(poolId));
+        (, , uint24 fee, int24 tickSpacing, address hooks) = nfpm.poolKeys(bytes25(poolId));
+        require(fee != DYNAMIC_FEE_FLAG, "dynamic fee pool unsupported");
         return
             PoolKey({
                 currency0: zeroForOne ? currency0 : currency1,
@@ -466,7 +452,6 @@ contract UniSwapV4 is BaseSwap {
 
     function swapExactInputSingle(
         IUniversalRouterV4 router,
-        IStateView stateView,
         INFPM nfpm,
         uint256 srcAmount,
         uint256 minDestAmount,
@@ -478,14 +463,7 @@ contract UniSwapV4 is BaseSwap {
         address currency1 = v4Currency(tradePath[1]);
         bool zeroForOne = currency0 < currency1;
 
-        PoolKey memory poolKey = _buildPoolKey(
-            stateView,
-            nfpm,
-            poolId,
-            currency0,
-            currency1,
-            zeroForOne
-        );
+        PoolKey memory poolKey = _buildPoolKey(nfpm, poolId, currency0, currency1, zeroForOne);
 
         // actions: SWAP_EXACT_IN_SINGLE | SETTLE | TAKE_ALL
         bytes memory actions = abi.encodePacked(
@@ -499,8 +477,8 @@ contract UniSwapV4 is BaseSwap {
         actionParams[0] = abi.encode(
             poolKey,
             zeroForOne,
-            uint128(srcAmount),
-            uint128(minDestAmount),
+            toUint128(srcAmount),
+            toUint128(minDestAmount),
             uint256(0), // minHopPriceX36 — no price limit
             bytes("") // hookData
         );
@@ -521,7 +499,6 @@ contract UniSwapV4 is BaseSwap {
 
     function swapExactInput(
         IUniversalRouterV4 router,
-        IStateView stateView,
         INFPM nfpm,
         uint256 srcAmount,
         uint256 minDestAmount,
@@ -534,8 +511,10 @@ contract UniSwapV4 is BaseSwap {
 
         PathKey[] memory path = new PathKey[](poolIds.length);
         for (uint256 i = 0; i < poolIds.length; i++) {
-            (, , , uint24 fee) = stateView.getSlot0(poolIds[i]);
-            (, , , int24 tickSpacing, address hooks) = nfpm.poolKeys(bytes25(poolIds[i]));
+            (, , uint24 fee, int24 tickSpacing, address hooks) = nfpm.poolKeys(
+                bytes25(poolIds[i])
+            );
+            require(fee != DYNAMIC_FEE_FLAG, "dynamic fee pool unsupported");
             path[i] = PathKey({
                 intermediateCurrency: v4Currency(tradePath[i + 1]),
                 fee: fee,
@@ -558,8 +537,8 @@ contract UniSwapV4 is BaseSwap {
             currencyIn,
             path,
             minHopPrices,
-            uint128(srcAmount),
-            uint128(minDestAmount)
+            toUint128(srcAmount),
+            toUint128(minDestAmount)
         );
         // SETTLE params: (currency, amount, payerIsUser=false) — settle from router's own balance
         actionParams[1] = abi.encode(currencyIn, srcAmount, false);
@@ -729,10 +708,15 @@ contract UniSwapV4 is BaseSwap {
         address currency1 = v4Currency(tokenOut);
         bool zeroForOne = currency0 < currency1;
 
-        (uint160 sqrtPriceX96, int24 tick, , ) = stateView.getSlot0(poolId);
-        uint160 sqrtPrice = zeroForOne ? sqrtPriceX96 : TickMath.getSqrtRatioAtTick(-tick);
-        quoteOut = quote.mul(sqrtPrice) >> 96;
-        quoteOut = quoteOut.mul(sqrtPrice) >> 96;
+        (uint160 sqrtPriceX96, , , ) = stateView.getSlot0(poolId);
+        if (zeroForOne) {
+            quoteOut = quote.mul(sqrtPriceX96) >> 96;
+            quoteOut = quoteOut.mul(sqrtPriceX96) >> 96;
+        } else {
+            // divide by price instead of multiplying by an approximate reciprocal sqrt price
+            quoteOut = quote.mul(1 << 96) / sqrtPriceX96;
+            quoteOut = quoteOut.mul(1 << 96) / sqrtPriceX96;
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -740,6 +724,11 @@ contract UniSwapV4 is BaseSwap {
     /// @dev V4 uses address(0) for native ETH; we map ETH_TOKEN_ADDRESS accordingly.
     function v4Currency(address token) internal view returns (address) {
         return token == address(ETH_TOKEN_ADDRESS) ? address(0) : token;
+    }
+
+    /// @dev Reverts on overflow instead of silently truncating, unlike a bare uint128(x) cast.
+    function toUint128(uint256 x) private pure returns (uint128 y) {
+        require((y = uint128(x)) == x, "uint128 overflow");
     }
 
     /// @dev Parses extraArgs: <[20B] router><[20B] stateView><[20B] nfpm><per hop: [32B] poolId>
