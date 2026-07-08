@@ -153,13 +153,10 @@ contract UniSwapV4 is BaseSwap {
     uint8 private constant ACTION_SWAP_EXACT_IN_SINGLE = 0x06;
     uint8 private constant ACTION_SWAP_EXACT_IN = 0x07;
     uint8 private constant ACTION_SETTLE = 0x0b;
-    uint8 private constant ACTION_TAKE_ALL = 0x0f;
+    uint8 private constant ACTION_TAKE = 0x0e;
 
-    // ── Dynamic-fee marker in PoolKey.fee ────────────────────────────────────
-    // Source: LPFeeLibrary.sol in Uniswap v4-core. A pool registered with this flag
-    // delegates its LP fee to a hook, which may return a different fee per swap —
-    // the quote simulator below cannot predict that without invoking the hook.
-    uint24 private constant DYNAMIC_FEE_FLAG = 0x800000;
+    // ── Sentinel amount meaning "take the full open delta" (see ActionConstants.OPEN_DELTA) ──
+    uint256 private constant OPEN_DELTA = 0;
 
     EnumerableSet.AddressSet private uniRouters;
 
@@ -195,6 +192,14 @@ contract UniSwapV4 is BaseSwap {
         uint24 fee;
         bool exactInput;
         bool zeroForOne;
+    }
+
+    /// @dev Bundles swapExactInput's scalar args to avoid stack-too-deep.
+    struct ExactInputArgs {
+        uint256 srcAmount;
+        uint256 minDestAmount;
+        bool inputIsETH;
+        address recipient;
     }
 
     // ── Admin ────────────────────────────────────────────────────────────────
@@ -368,38 +373,27 @@ contract UniSwapV4 is BaseSwap {
         );
 
         bool inputIsETH = params.tradePath[0] == address(ETH_TOKEN_ADDRESS);
-        bool outputIsETH = params.tradePath[params.tradePath.length - 1] ==
-            address(ETH_TOKEN_ADDRESS);
 
         if (!inputIsETH) {
             IERC20Ext(params.tradePath[0]).safeTransfer(address(router), params.srcAmount);
         }
 
-        destAmount = _doSwapAndMeasure(router, nfpm, params, poolIds, inputIsETH, outputIsETH);
-
-        if (outputIsETH) {
-            (bool success, ) = params.recipient.call{value: destAmount}("");
-            require(success, "eth transfer failed");
-        } else {
-            IERC20Ext(params.tradePath[params.tradePath.length - 1]).safeTransfer(
-                params.recipient,
-                destAmount
-            );
-        }
+        destAmount = _doSwapAndMeasure(router, nfpm, params, poolIds, inputIsETH);
     }
 
+    /// @dev Output is taken from the PoolManager straight to params.recipient (never held by this
+    ///      contract), so the delta is measured on the recipient's balance — mirroring UniSwapV3.
+    ///      This also avoids double-counting a pre-funded native-ETH input when the input and
+    ///      output currencies are both ETH.
     function _doSwapAndMeasure(
         IUniversalRouterV4 router,
         INFPM nfpm,
         SwapParams calldata params,
         bytes32[] memory poolIds,
-        bool inputIsETH,
-        bool outputIsETH
+        bool inputIsETH
     ) private returns (uint256 delta) {
-        address outputToken = params.tradePath[params.tradePath.length - 1];
-        uint256 balanceBefore = outputIsETH
-            ? address(this).balance
-            : IERC20Ext(outputToken).balanceOf(address(this));
+        IERC20Ext outputToken = IERC20Ext(params.tradePath[params.tradePath.length - 1]);
+        uint256 balanceBefore = getBalance(outputToken, params.recipient);
 
         if (params.tradePath.length == 2) {
             swapExactInputSingle(
@@ -409,24 +403,25 @@ contract UniSwapV4 is BaseSwap {
                 params.minDestAmount,
                 params.tradePath,
                 poolIds[0],
-                inputIsETH
+                inputIsETH,
+                params.recipient
             );
         } else {
             swapExactInput(
                 router,
                 nfpm,
-                params.srcAmount,
-                params.minDestAmount,
                 params.tradePath,
                 poolIds,
-                inputIsETH
+                ExactInputArgs({
+                    srcAmount: params.srcAmount,
+                    minDestAmount: params.minDestAmount,
+                    inputIsETH: inputIsETH,
+                    recipient: params.recipient
+                })
             );
         }
 
-        uint256 balanceAfter = outputIsETH
-            ? address(this).balance
-            : IERC20Ext(outputToken).balanceOf(address(this));
-        delta = balanceAfter.sub(balanceBefore);
+        delta = getBalance(outputToken, params.recipient).sub(balanceBefore);
     }
 
     // ── Internal swap builders ────────────────────────────────────────────────
@@ -439,7 +434,7 @@ contract UniSwapV4 is BaseSwap {
         bool zeroForOne
     ) internal view returns (PoolKey memory) {
         (, , uint24 fee, int24 tickSpacing, address hooks) = nfpm.poolKeys(bytes25(poolId));
-        require(fee != DYNAMIC_FEE_FLAG, "dynamic fee pool unsupported");
+        require(hooks == address(0), "hooked pool unsupported");
         return
             PoolKey({
                 currency0: zeroForOne ? currency0 : currency1,
@@ -457,7 +452,8 @@ contract UniSwapV4 is BaseSwap {
         uint256 minDestAmount,
         address[] calldata tradePath,
         bytes32 poolId,
-        bool inputIsETH
+        bool inputIsETH,
+        address recipient
     ) internal {
         address currency0 = v4Currency(tradePath[0]);
         address currency1 = v4Currency(tradePath[1]);
@@ -465,11 +461,11 @@ contract UniSwapV4 is BaseSwap {
 
         PoolKey memory poolKey = _buildPoolKey(nfpm, poolId, currency0, currency1, zeroForOne);
 
-        // actions: SWAP_EXACT_IN_SINGLE | SETTLE | TAKE_ALL
+        // actions: SWAP_EXACT_IN_SINGLE | SETTLE | TAKE
         bytes memory actions = abi.encodePacked(
             ACTION_SWAP_EXACT_IN_SINGLE,
             ACTION_SETTLE,
-            ACTION_TAKE_ALL
+            ACTION_TAKE
         );
 
         bytes[] memory actionParams = new bytes[](3);
@@ -484,8 +480,8 @@ contract UniSwapV4 is BaseSwap {
         );
         // SETTLE params: (currency, amount, payerIsUser=false) — settle from router's own balance
         actionParams[1] = abi.encode(currency0, srcAmount, false);
-        // TAKE_ALL params: (currency, minAmount) — output delivered to msgSender (this contract)
-        actionParams[2] = abi.encode(currency1, minDestAmount);
+        // TAKE params: (currency, recipient, amount) — full open delta sent straight to recipient
+        actionParams[2] = abi.encode(currency1, recipient, OPEN_DELTA);
 
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(actions, actionParams);
@@ -500,21 +496,18 @@ contract UniSwapV4 is BaseSwap {
     function swapExactInput(
         IUniversalRouterV4 router,
         INFPM nfpm,
-        uint256 srcAmount,
-        uint256 minDestAmount,
         address[] calldata tradePath,
         bytes32[] memory poolIds,
-        bool inputIsETH
+        ExactInputArgs memory a
     ) internal {
         address currencyIn = v4Currency(tradePath[0]);
-        address currencyOut = v4Currency(tradePath[tradePath.length - 1]);
 
         PathKey[] memory path = new PathKey[](poolIds.length);
         for (uint256 i = 0; i < poolIds.length; i++) {
             (, , uint24 fee, int24 tickSpacing, address hooks) = nfpm.poolKeys(
                 bytes25(poolIds[i])
             );
-            require(fee != DYNAMIC_FEE_FLAG, "dynamic fee pool unsupported");
+            require(hooks == address(0), "hooked pool unsupported");
             path[i] = PathKey({
                 intermediateCurrency: v4Currency(tradePath[i + 1]),
                 fee: fee,
@@ -524,11 +517,7 @@ contract UniSwapV4 is BaseSwap {
             });
         }
 
-        bytes memory actions = abi.encodePacked(
-            ACTION_SWAP_EXACT_IN,
-            ACTION_SETTLE,
-            ACTION_TAKE_ALL
-        );
+        bytes memory actions = abi.encodePacked(ACTION_SWAP_EXACT_IN, ACTION_SETTLE, ACTION_TAKE);
 
         uint256[] memory minHopPrices = new uint256[](poolIds.length); // all zeros — no hop price limits
         bytes[] memory actionParams = new bytes[](3);
@@ -537,18 +526,22 @@ contract UniSwapV4 is BaseSwap {
             currencyIn,
             path,
             minHopPrices,
-            toUint128(srcAmount),
-            toUint128(minDestAmount)
+            toUint128(a.srcAmount),
+            toUint128(a.minDestAmount)
         );
         // SETTLE params: (currency, amount, payerIsUser=false) — settle from router's own balance
-        actionParams[1] = abi.encode(currencyIn, srcAmount, false);
-        // TAKE_ALL params: (currency, minAmount)
-        actionParams[2] = abi.encode(currencyOut, minDestAmount);
+        actionParams[1] = abi.encode(currencyIn, a.srcAmount, false);
+        // TAKE params: (currency, recipient, amount) — full open delta sent straight to recipient
+        actionParams[2] = abi.encode(
+            v4Currency(tradePath[tradePath.length - 1]),
+            a.recipient,
+            OPEN_DELTA
+        );
 
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(actions, actionParams);
 
-        router.execute{value: inputIsETH ? srcAmount : 0}(
+        router.execute{value: a.inputIsETH ? a.srcAmount : 0}(
             abi.encodePacked(COMMAND_V4_SWAP),
             inputs,
             MAX_AMOUNT
@@ -596,8 +589,8 @@ contract UniSwapV4 is BaseSwap {
             cfg.zeroForOne = currency0 < currency1;
         }
         {
-            (, , uint24 poolFee, int24 tickSpacing, ) = nfpm.poolKeys(bytes25(poolId));
-            require(poolFee != DYNAMIC_FEE_FLAG, "dynamic fee pool unsupported");
+            (, , , int24 tickSpacing, address hooks) = nfpm.poolKeys(bytes25(poolId));
+            require(hooks == address(0), "hooked pool unsupported");
             cfg.tickSpacing = tickSpacing;
         }
         cfg.sqrtPriceLimitX96 = cfg.zeroForOne
