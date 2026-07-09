@@ -69,6 +69,11 @@ export const PolygonConfig: Record<string, IConfig> = {
       okxTokenApprove: '0x3b86917369b83a6892f553609f3c2f439c184e31',
     },
 
+    uniswapUniversalRouter: {
+      swapProxy: '0x0000000085E102724e78eCd2F45DC9cA239Affad',
+      universalRouter: '0x1095692A6237d83C6a72F3F5eFEdb9A670C49223',
+    },
+
     // Compound
     // compound: {
     //   compTroller: '0x3d9819210a31b4961b30ef54be2aed79b9c9cd3b',

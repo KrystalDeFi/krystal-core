@@ -62,6 +62,11 @@ export const EthConfig: Record<string, IConfig> = {
       testingTokens: ['usdc'],
     },
 
+    uniswapUniversalRouter: {
+      swapProxy: '0x0000000085E102724e78eCd2F45DC9cA239Affad',
+      universalRouter: '0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af',
+    },
+
     // Compound
     compound: {
       compTroller: '0x3d9819210a31b4961b30ef54be2aed79b9c9cd3b',

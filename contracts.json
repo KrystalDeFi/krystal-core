@@ -15,10 +15,11 @@
     "fetchTokenBalances": "0xbf8Af96D0De8AC9cdd3a70b9b7c68A467e59433B",
     "swapContracts": {
       "uniSwap": "0x477Feff760340F73F98B340BB4D9f049CdE0db33",
-      "kyberSwapV2": "0x1F8B6F7eaa0420f8CF827E18425b4F09074538E7",
-      "kyberSwapV3": "0xfEb0bCdef6286c24856641319d25AE73E00de17A",
       "openOcean": "0x6C08582D1fa4ced1af2584d3326297E74D5115FE",
-      "okx": "0xa6fab972962eda0ab4b6db780c7fdfa0dd6159ef"
+      "okx": "0xa6fab972962eda0ab4b6db780c7fdfa0dd6159ef",
+      "uniswapUniversalRouter": "0x12013bc86169Cc59b1BE1c5153Ab37b3eaF6dB20",
+      "kyberSwapV2": "0x1F8B6F7eaa0420f8CF827E18425b4F09074538E7",
+      "kyberSwapV3": "0xfEb0bCdef6286c24856641319d25AE73E00de17A"
     },
     "lendingContracts": {}
   },
@@ -84,17 +85,17 @@
   "bsc_mainnet": {
     "smartWalletImplementation": "0x3de69846092D21088F25959e941d621eE95F36eD",
     "smartWalletProxy": "0x051DC16b2ECB366984d1074dCC07c342a9463999",
-    "fetchTokenBalances": "0xB8C6Ed80688a2674623D89A0AaBD3a87507B1868",
     "fetchAaveDataWrapper": "0xE7314051BCFD832398e232f2c274278c44121a3f",
     "swapContracts": {
       "uniSwap": "0x759baFEdce842E56C3aB743e7004af8E80aDa541",
+      "uniSwapV3Bsc": "0x2cDC7562C207E8A20D91749711B56B80F3f8f71E",
       "kyberDmm": "0x2f0f7e11B2662CDf6e648D28A57a9A1544F0FD2F",
+      "openOcean": "0x35AAe6Df4774D7A191447B492556496DB052a20D",
+      "okx": "0x4707d772de624e7363be99edd9026cc531e2b469",
+      "uniswapUniversalRouter": "0x3EA5224fB25BFE24A51aafA44935546905bDEd45",
       "kyberDmmV2": "0x3210a8b8206bc205840c983499aB92DB0f4F3C6e",
       "kyberSwapV2": "0x85D53990CcB093De7fE1D14D21048F23cBC46004",
-      "kyberSwapV3": "0x0E67ef7aF621F90Bc94E5566E25a55ba0822e2Bb",
-      "uniSwapV3Bsc": "0x2cDC7562C207E8A20D91749711B56B80F3f8f71E",
-      "openOcean": "0x35AAe6Df4774D7A191447B492556496DB052a20D",
-      "okx": "0x4707d772de624e7363be99edd9026cc531e2b469"
+      "kyberSwapV3": "0x0E67ef7aF621F90Bc94E5566E25a55ba0822e2Bb"
     },
     "lendingContracts": {
       "compoundLending": "0x6deaAe9d76991db2943064Bca84e00f63c46C0A3"
@@ -147,17 +148,17 @@
   "eth_mainnet": {
     "smartWalletImplementation": "0x5583795ad3D58f4c00B499f83F6FED58389D2167",
     "smartWalletProxy": "0x70270C228c5B4279d1578799926873aa72446CcD",
-    "fetchTokenBalances": "0xA526388721De4cB8206ff4D0b1A1948696b5d073",
     "fetchAaveDataWrapper": "0x0C816D6C4C37294186CBCA0E514Fc56F0c34d059",
     "swapContracts": {
       "uniSwap": "0x670667eab359030aF7c6f785FC32c25BbE9a7a31",
       "uniSwapV3": "0x6D3aCe38280BcD5aBF063bB3f941BD3af06dF546",
       "kyberDmm": "0x64865f3D46bfcA495A00F9c5E38027c60A2a0240",
       "oneInch": "0x9e81428f5672edcea83f5bf58b6b2cd968df8ee6",
+      "openOcean": "0xfEE93FCD1a26e858325613818dE5C533d94A33b6",
+      "uniswapUniversalRouter": "0x504CbdA67eC55E95AE4202C440B5c49F7d89019f",
       "kyberDmmV2": "0xA3f1bD7beE8c6DAE2De8FcF37067a87706517640",
       "kyberSwapV2": "0x1Af8772AC277FE590a0Bde36da607100221A9622",
-      "kyberSwapV3": "0x0a869fe705ecc3986a4d9a77f305fc1667d18d6b",
-      "openOcean": "0xfEE93FCD1a26e858325613818dE5C533d94A33b6"
+      "kyberSwapV3": "0x0a869fe705ecc3986a4d9a77f305fc1667d18d6b"
     },
     "lendingContracts": {
       "compoundLending": "0x8C27aBf05DE1d4847c3924566C3cBAFec6eFb42A",
@@ -291,7 +292,8 @@
       "kyberSwapV2": "0x11E2AF1B420970273d5Dbd4bb4e7F3Ef6e8e5974",
       "kyberSwapV3": "0x938f1bf9d93204506FCaC41B99D93a17077BBBe1",
       "openOcean": "0xFE1bb153b14f3361505417440acee547d38f4e39",
-      "okx": "0x29e4a4ee8D2c9d1438dDFb8b6D9F010Ce8A25cA6"
+      "okx": "0x29e4a4ee8D2c9d1438dDFb8b6D9F010Ce8A25cA6",
+      "uniswapUniversalRouter": "0x88e7Da494a184121C5483de2b8D06f219a282a4f"
     },
     "lendingContracts": {
       "aaveV2": "0x95ceC39Aa053C62d1A49D88B60620a489C241F53"
