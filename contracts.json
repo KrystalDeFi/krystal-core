@@ -85,6 +85,7 @@
   "bsc_mainnet": {
     "smartWalletImplementation": "0x3de69846092D21088F25959e941d621eE95F36eD",
     "smartWalletProxy": "0x051DC16b2ECB366984d1074dCC07c342a9463999",
+    "fetchTokenBalances": "0xB8C6Ed80688a2674623D89A0AaBD3a87507B1868",
     "fetchAaveDataWrapper": "0xE7314051BCFD832398e232f2c274278c44121a3f",
     "swapContracts": {
       "uniSwap": "0x759baFEdce842E56C3aB743e7004af8E80aDa541",
@@ -148,6 +149,7 @@
   "eth_mainnet": {
     "smartWalletImplementation": "0x5583795ad3D58f4c00B499f83F6FED58389D2167",
     "smartWalletProxy": "0x70270C228c5B4279d1578799926873aa72446CcD",
+    "fetchTokenBalances": "0xA526388721De4cB8206ff4D0b1A1948696b5d073",
     "fetchAaveDataWrapper": "0x0C816D6C4C37294186CBCA0E514Fc56F0c34d059",
     "swapContracts": {
       "uniSwap": "0x670667eab359030aF7c6f785FC32c25BbE9a7a31",
