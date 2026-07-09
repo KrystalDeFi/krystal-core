@@ -480,6 +480,39 @@ contract UniSwapV4 is BaseSwap {
 
     // ── Internal swap builders ────────────────────────────────────────────────
 
+    /// @dev Fetches pool metadata for `poolId` from the trusted NFPM and verifies that `poolId`
+    ///      really is keccak256(PoolKey) for (currencyA, currencyB) — otherwise a caller could
+    ///      smuggle in the fee/tickSpacing of an unrelated real pool via a mismatched poolId.
+    function _verifiedPoolMeta(
+        INFPM nfpm,
+        bytes32 poolId,
+        address currencyA,
+        address currencyB
+    )
+        private
+        view
+        returns (
+            uint24 fee,
+            int24 tickSpacing,
+            address hooks
+        )
+    {
+        (, , fee, tickSpacing, hooks) = nfpm.poolKeys(bytes25(poolId));
+        require(hooks == address(0), "hooked pool unsupported");
+
+        (address currency0, address currency1) = currencyA < currencyB
+            ? (currencyA, currencyB)
+            : (currencyB, currencyA);
+        PoolKey memory poolKey = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: fee,
+            tickSpacing: tickSpacing,
+            hooks: hooks
+        });
+        require(keccak256(abi.encode(poolKey)) == poolId, "poolId mismatch");
+    }
+
     function _buildPoolKey(
         INFPM nfpm,
         bytes32 poolId,
@@ -487,8 +520,12 @@ contract UniSwapV4 is BaseSwap {
         address currency1,
         bool zeroForOne
     ) internal view returns (PoolKey memory) {
-        (, , uint24 fee, int24 tickSpacing, address hooks) = nfpm.poolKeys(bytes25(poolId));
-        require(hooks == address(0), "hooked pool unsupported");
+        (uint24 fee, int24 tickSpacing, address hooks) = _verifiedPoolMeta(
+            nfpm,
+            poolId,
+            currency0,
+            currency1
+        );
         return
             PoolKey({
                 currency0: zeroForOne ? currency0 : currency1,
@@ -558,10 +595,12 @@ contract UniSwapV4 is BaseSwap {
 
         PathKey[] memory path = new PathKey[](poolIds.length);
         for (uint256 i = 0; i < poolIds.length; i++) {
-            (, , uint24 fee, int24 tickSpacing, address hooks) = nfpm.poolKeys(
-                bytes25(poolIds[i])
+            (uint24 fee, int24 tickSpacing, address hooks) = _verifiedPoolMeta(
+                nfpm,
+                poolIds[i],
+                v4Currency(tradePath[i]),
+                v4Currency(tradePath[i + 1])
             );
-            require(hooks == address(0), "hooked pool unsupported");
             path[i] = PathKey({
                 intermediateCurrency: v4Currency(tradePath[i + 1]),
                 fee: fee,
@@ -643,8 +682,12 @@ contract UniSwapV4 is BaseSwap {
             cfg.zeroForOne = currency0 < currency1;
         }
         {
-            (, , , int24 tickSpacing, address hooks) = nfpm.poolKeys(bytes25(poolId));
-            require(hooks == address(0), "hooked pool unsupported");
+            (, int24 tickSpacing, ) = _verifiedPoolMeta(
+                nfpm,
+                poolId,
+                v4Currency(tokenIn),
+                v4Currency(tokenOut)
+            );
             cfg.tickSpacing = tickSpacing;
         }
         cfg.sqrtPriceLimitX96 = cfg.zeroForOne
