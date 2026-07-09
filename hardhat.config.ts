@@ -181,7 +181,7 @@ if (PRIVATE_KEY) {
     chainId: 56,
     accounts: [PRIVATE_KEY],
     timeout: 20000,
-    gasPrice: 3 * 1e9,
+    gasPrice: 0.05 * 1e9,
   };
 
   config.networks!.bsc_staging = {
@@ -220,7 +220,7 @@ if (PRIVATE_KEY) {
     chainId: 42161,
     accounts: [PRIVATE_KEY],
     timeout: 20000,
-    gasPrice: 0.1 * 1e9,
+    gasPrice: 0.03 * 1e9,
   };
 
   config.networks!.arbitrum_rinkeby = {
@@ -292,7 +292,7 @@ if (PRIVATE_KEY) {
     chainId: 1,
     accounts: [PRIVATE_KEY],
     timeout: 20000,
-    gasPrice: 18 * 1e9,
+    gasPrice: 0.3 * 1e9,
   };
 
   config.networks!.eth_goerli = {
@@ -324,7 +324,15 @@ if (PRIVATE_KEY) {
     chainId: 8453,
     accounts: [PRIVATE_KEY],
     timeout: 60000,
-    gasPrice: 0.0025 * 1e9,
+    gasPrice: 0.008 * 1e9,
+  };
+
+  config.networks!.polygon_mainnet = {
+    url: `https://poly.api.pocket.network`,
+    chainId: 137,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 280 * 1e9,
   };
 
   config.networks!.sonic_testnet = {

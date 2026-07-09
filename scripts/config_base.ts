@@ -23,6 +23,11 @@ export const BaseConfig: Record<string, IConfig> = {
       okxTokenApprove: '0x57df6092665eb6058DE53939612413ff4B09114E',
     },
 
+    uniswapUniversalRouter: {
+      swapProxy: '0x0000000085E102724e78eCd2F45DC9cA239Affad',
+      universalRouter: '0x6fF5693b99212Da76ad316178A184AB56D299b43',
+    },
+
     supportedWallets: commonPlatformWallets,
     nativeUsdRate: 3385,
 

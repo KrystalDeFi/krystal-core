@@ -98,6 +98,11 @@ export interface IConfig {
     testingTokens?: string[];
   };
 
+  uniswapUniversalRouter?: {
+    swapProxy: string;
+    universalRouter: string;
+  };
+
   velodrome?: {
     routers: Record<
       string,
