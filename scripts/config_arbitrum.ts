@@ -26,7 +26,7 @@ export const ArbitrumConfig: Record<string, IConfig> = {
     },
 
     okx: {
-      router: '0xf332761c673b59B21fF6dfa8adA44d78c12dEF09',
+      router: '0x7CF6b330b437E9fb432B1400DE17B03357Cf049A',
       okxTokenApprove: '0x68D6B739D2020067D1e2F713b999dA97E4d54812',
     },
 

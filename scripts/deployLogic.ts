@@ -24,6 +24,7 @@ import {
   ProjectXV3,
   OpenOcean,
   Okx,
+  UniSwapV4,
 } from '../typechain';
 import {Contract} from '@ethersproject/contracts';
 import {IAaveV2Config} from './config_utils';
@@ -62,6 +63,7 @@ export interface KrystalContracts {
     projectXV3?: ProjectXV3;
     openOcean?: OpenOcean;
     okx?: Okx;
+    uniSwapV4?: UniSwapV4;
   };
   lendingContracts?: {
     compoundLending?: CompoundLending;
@@ -139,6 +141,10 @@ export const deploy = async (
   log(0, 'Updating velodrome config');
   log(0, '======================\n');
   await updateVelodrome(deployedContracts.swapContracts?.velodrome, extraArgs);
+
+  log(0, 'Updating uniswapV4 config');
+  log(0, '======================\n');
+  await updateUniSwapV4(deployedContracts.swapContracts?.uniSwapV4, extraArgs);
 
   // log(0, 'Updating compound/clones config');
   // log(0, '======================\n');
@@ -364,6 +370,20 @@ async function deployContracts(
             Object.values(networkConfig.velodrome.stablecoins).map((c) => c),
             networkConfig.wNative
           )) as Velodrome),
+
+      uniSwapV4: !networkConfig.uniswapV4
+        ? undefined
+        : ((await deployContract(
+            ++step,
+            networkConfig.autoVerifyContract,
+            'UniSwapV4',
+            existingContract?.['swapContracts']?.['uniSwapV4'],
+            undefined,
+            contractAdmin,
+            networkConfig.uniswapV4.routers.map((r) => r.router),
+            networkConfig.uniswapV4.routers.map((r) => r.stateView),
+            networkConfig.uniswapV4.routers.map((r) => r.nfpm)
+          )) as UniSwapV4),
     };
 
     lendingContracts = {
@@ -882,6 +902,58 @@ async function updateVelodrome(velodrome: Velodrome | undefined, extraArgs: {fro
       log(2, '> Updating selectors:', router, swapFromEthSelector, swapToEthSelector);
       await printInfo(tx);
     }
+  }
+}
+
+async function updateUniSwapV4(uniSwapV4: UniSwapV4 | undefined, extraArgs: {from?: string}) {
+  if (!uniSwapV4 || !networkConfig.uniswapV4) {
+    log(1, 'protocol not supported on this env');
+    return;
+  }
+  log(1, 'update supported routers');
+  const configRouters = networkConfig.uniswapV4!.routers;
+  const configAddresses = configRouters.map((r) => r.router.toLowerCase());
+  const [existingRouters, existingStateViews, existingNfpms] = await uniSwapV4.getAllUniRouters();
+  const existing = existingRouters.map((r) => r.toLowerCase());
+  const existingConfigByRouter: Record<string, {stateView: string; nfpm: string}> = {};
+  existingRouters.forEach((r, i) => {
+    existingConfigByRouter[r.toLowerCase()] = {stateView: existingStateViews[i], nfpm: existingNfpms[i]};
+  });
+
+  const toBeRemoved = existing.filter((add) => !configAddresses.includes(add));
+  if (toBeRemoved.length) {
+    log(2, '> skip removing routers', toBeRemoved);
+  } else {
+    log(2, '> nothing to be removed');
+  }
+
+  // (Re-)add routers whose on-chain StateView/NFPM config is missing or out of date, so the
+  // per-router mapping always matches the deployment config rather than being trusted from
+  // caller-supplied extraArgs.
+  const toBeAddedOrUpdated = configRouters.filter((r) => {
+    const onChain = existingConfigByRouter[r.router.toLowerCase()];
+    return (
+      !onChain ||
+      onChain.stateView.toLowerCase() !== r.stateView.toLowerCase() ||
+      onChain.nfpm.toLowerCase() !== r.nfpm.toLowerCase()
+    );
+  });
+
+  console.log('\n');
+  if (toBeAddedOrUpdated.length) {
+    const tx = await executeTxnOnBehalfOf(
+      await uniSwapV4.populateTransaction.updateUniRouters(
+        toBeAddedOrUpdated.map((r) => r.router),
+        toBeAddedOrUpdated.map((r) => r.stateView),
+        toBeAddedOrUpdated.map((r) => r.nfpm),
+        true,
+        {gasLimit, ...extraArgs}
+      )
+    );
+    log(2, '> adding/updating routers', toBeAddedOrUpdated);
+    await printInfo(tx);
+  } else {
+    log(2, '> nothing to be added/updated');
   }
 }
 
