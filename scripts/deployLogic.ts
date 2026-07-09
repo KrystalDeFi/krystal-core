@@ -380,7 +380,9 @@ async function deployContracts(
             existingContract?.['swapContracts']?.['uniSwapV4'],
             undefined,
             contractAdmin,
-            networkConfig.uniswapV4.routers
+            networkConfig.uniswapV4.routers.map((r) => r.router),
+            networkConfig.uniswapV4.routers.map((r) => r.stateView),
+            networkConfig.uniswapV4.routers.map((r) => r.nfpm)
           )) as UniSwapV4),
     };
 
@@ -909,11 +911,50 @@ async function updateUniSwapV4(uniSwapV4: UniSwapV4 | undefined, extraArgs: {fro
     return;
   }
   log(1, 'update supported routers');
-  let existing = (await uniSwapV4.getAllUniRouters()).map((r) => r.toLowerCase());
-  let configRouters = networkConfig.uniswapV4!.routers.map((r) => r.toLowerCase());
-  let toBeRemoved = existing.filter((add) => !configRouters.includes(add));
-  let toBeAdded = configRouters.filter((add) => !existing.includes(add));
-  await updateAddressSet(uniSwapV4.populateTransaction.updateUniRouters, toBeRemoved, toBeAdded, extraArgs);
+  const configRouters = networkConfig.uniswapV4!.routers;
+  const configAddresses = configRouters.map((r) => r.router.toLowerCase());
+  const [existingRouters, existingStateViews, existingNfpms] = await uniSwapV4.getAllUniRouters();
+  const existing = existingRouters.map((r) => r.toLowerCase());
+  const existingConfigByRouter: Record<string, {stateView: string; nfpm: string}> = {};
+  existingRouters.forEach((r, i) => {
+    existingConfigByRouter[r.toLowerCase()] = {stateView: existingStateViews[i], nfpm: existingNfpms[i]};
+  });
+
+  const toBeRemoved = existing.filter((add) => !configAddresses.includes(add));
+  if (toBeRemoved.length) {
+    log(2, '> skip removing routers', toBeRemoved);
+  } else {
+    log(2, '> nothing to be removed');
+  }
+
+  // (Re-)add routers whose on-chain StateView/NFPM config is missing or out of date, so the
+  // per-router mapping always matches the deployment config rather than being trusted from
+  // caller-supplied extraArgs.
+  const toBeAddedOrUpdated = configRouters.filter((r) => {
+    const onChain = existingConfigByRouter[r.router.toLowerCase()];
+    return (
+      !onChain ||
+      onChain.stateView.toLowerCase() !== r.stateView.toLowerCase() ||
+      onChain.nfpm.toLowerCase() !== r.nfpm.toLowerCase()
+    );
+  });
+
+  console.log('\n');
+  if (toBeAddedOrUpdated.length) {
+    const tx = await executeTxnOnBehalfOf(
+      await uniSwapV4.populateTransaction.updateUniRouters(
+        toBeAddedOrUpdated.map((r) => r.router),
+        toBeAddedOrUpdated.map((r) => r.stateView),
+        toBeAddedOrUpdated.map((r) => r.nfpm),
+        true,
+        {gasLimit, ...extraArgs}
+      )
+    );
+    log(2, '> adding/updating routers', toBeAddedOrUpdated);
+    await printInfo(tx);
+  } else {
+    log(2, '> nothing to be added/updated');
+  }
 }
 
 async function updateCompoundLending(compoundLending: CompoundLending | undefined, extraArgs: {from?: string}) {

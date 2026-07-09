@@ -99,8 +99,9 @@ export interface IConfig {
   };
 
   uniswapV4?: {
-    // Universal Router addresses (one per deployment)
-    routers: string[];
+    // Universal Router addresses, each bound to its own StateView/NFPM (admin-set, never
+    // taken from swap-call data — see UniSwapV4.routerConfigs)
+    routers: {router: string; stateView: string; nfpm: string}[];
     testingTokens?: string[];
   };
 

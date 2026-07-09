@@ -130,9 +130,8 @@ library TickBitmapV4 {
 ///         Quote simulation uses V4 StateView so no on-chain Quoter call is needed.
 ///
 /// extraArgs encoding (per trade):
-///   [20B] Universal Router address
-///   [20B] StateView address
-///   [20B] NFPM address
+///   [20B] Universal Router address — its StateView/NFPM are looked up from an admin-set
+///         mapping (see routerConfigs), never taken from caller-supplied data
 ///   per hop: [32B] bytes32 poolId (keccak256 of PoolKey)
 contract UniSwapV4 is BaseSwap {
     using SafeERC20 for IERC20Ext;
@@ -158,14 +157,26 @@ contract UniSwapV4 is BaseSwap {
     // ── Sentinel amount meaning "take the full open delta" (see ActionConstants.OPEN_DELTA) ──
     uint256 private constant OPEN_DELTA = 0;
 
+    /// @dev StateView/NFPM bound per-router by admin, so a caller can never point the quote
+    ///      simulator or the pool-metadata lookup (fee/tickSpacing/hooks) at an arbitrary
+    ///      contract via extraArgs — only the whitelisted router's own StateView/NFPM are used.
+    struct RouterConfig {
+        address stateView;
+        address nfpm;
+    }
+
     EnumerableSet.AddressSet private uniRouters;
+    mapping(address => RouterConfig) public routerConfigs;
 
     event UpdatedUniRouters(address[] routers, bool isSupported);
 
-    constructor(address _admin, address[] memory routers) BaseSwap(_admin) {
-        for (uint256 i = 0; i < routers.length; i++) {
-            uniRouters.add(routers[i]);
-        }
+    constructor(
+        address _admin,
+        address[] memory routers,
+        address[] memory stateViews,
+        address[] memory nfpms
+    ) BaseSwap(_admin) {
+        _updateUniRouters(routers, stateViews, nfpms, true);
     }
 
     struct StepComputations {
@@ -204,23 +215,66 @@ contract UniSwapV4 is BaseSwap {
 
     // ── Admin ────────────────────────────────────────────────────────────────
 
-    function getAllUniRouters() external view returns (address[] memory addresses) {
+    function getAllUniRouters()
+        external
+        view
+        returns (
+            address[] memory routers,
+            address[] memory stateViews,
+            address[] memory nfpms
+        )
+    {
         uint256 length = uniRouters.length();
-        addresses = new address[](length);
+        routers = new address[](length);
+        stateViews = new address[](length);
+        nfpms = new address[](length);
         for (uint256 i = 0; i < length; i++) {
-            addresses[i] = uniRouters.at(i);
+            routers[i] = uniRouters.at(i);
+            RouterConfig memory cfg = routerConfigs[routers[i]];
+            stateViews[i] = cfg.stateView;
+            nfpms[i] = cfg.nfpm;
         }
     }
 
-    function updateUniRouters(address[] calldata routers, bool isSupported) external onlyAdmin {
+    /// @param routers Universal Router addresses to add/remove.
+    /// @param stateViews StateView address bound to each router; ignored when isSupported is false.
+    /// @param nfpms NFPM address bound to each router; ignored when isSupported is false.
+    function updateUniRouters(
+        address[] calldata routers,
+        address[] calldata stateViews,
+        address[] calldata nfpms,
+        bool isSupported
+    ) external onlyAdmin {
+        _updateUniRouters(routers, stateViews, nfpms, isSupported);
+        emit UpdatedUniRouters(routers, isSupported);
+    }
+
+    function _updateUniRouters(
+        address[] memory routers,
+        address[] memory stateViews,
+        address[] memory nfpms,
+        bool isSupported
+    ) private {
+        require(
+            routers.length == stateViews.length && routers.length == nfpms.length,
+            "length mismatch"
+        );
         for (uint256 i = 0; i < routers.length; i++) {
             if (isSupported) {
+                require(
+                    stateViews[i] != address(0) && nfpms[i] != address(0),
+                    "invalid router config"
+                );
                 uniRouters.add(routers[i]);
+                routerConfigs[routers[i]] = RouterConfig({
+                    stateView: stateViews[i],
+                    nfpm: nfpms[i]
+                });
             } else {
                 uniRouters.remove(routers[i]);
+                delete routerConfigs[routers[i]];
             }
         }
-        emit UpdatedUniRouters(routers, isSupported);
     }
 
     // ── ISwap — quote functions ──────────────────────────────────────────────
@@ -724,7 +778,11 @@ contract UniSwapV4 is BaseSwap {
         require((y = uint128(x)) == x, "uint128 overflow");
     }
 
-    /// @dev Parses extraArgs: <[20B] router><[20B] stateView><[20B] nfpm><per hop: [32B] poolId>
+    /// @dev Parses extraArgs: <[20B] router><per hop: [32B] poolId>
+    ///      stateView/nfpm are never taken from extraArgs — they're looked up from the
+    ///      admin-set routerConfigs mapping keyed by the (whitelisted) router address, so a
+    ///      caller can't redirect the quote simulator or pool-metadata lookup to an arbitrary
+    ///      contract and steer the swap into an attacker-chosen pool.
     function parseExtraArgs(uint256 hopCount, bytes calldata extraArgs)
         internal
         view
@@ -736,16 +794,18 @@ contract UniSwapV4 is BaseSwap {
         )
     {
         router = IUniversalRouterV4(extraArgs.toAddress(0));
-        stateView = IStateView(extraArgs.toAddress(20));
-        nfpm = INFPM(extraArgs.toAddress(40));
         require(address(router) != address(0), "invalid router");
         require(uniRouters.contains(address(router)), "unsupported router");
 
+        RouterConfig memory cfg = routerConfigs[address(router)];
+        stateView = IStateView(cfg.stateView);
+        nfpm = INFPM(cfg.nfpm);
+
         poolIds = new bytes32[](hopCount);
 
-        // Header is 60 bytes; each hop is 32 bytes (poolId)
+        // Header is 20 bytes; each hop is 32 bytes (poolId)
         for (uint256 i = 0; i < hopCount; i++) {
-            poolIds[i] = bytes32(extraArgs.toUint256(60 + i * 32));
+            poolIds[i] = bytes32(extraArgs.toUint256(20 + i * 32));
         }
     }
 }

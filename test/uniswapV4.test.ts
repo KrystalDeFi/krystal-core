@@ -28,11 +28,8 @@ function computePoolId(c0: string, c1: string, fee: number, tickSpacing: number)
 }
 
 function buildExtraArgs(tradePath: string[], fee = DEFAULT_FEE, tickSpacing = DEFAULT_TICK_SPACING): string {
-  // header: <router 20B><stateView 20B><nfpm 20B>
-  let args =
-    hexlify(arrayify(UNIVERSAL_ROUTER)) +
-    arrayify(STATE_VIEW).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '') +
-    arrayify(NFPM).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '');
+  // header: <router 20B> — stateView/nfpm are bound to the router via routerConfigs, not extraArgs
+  let args = hexlify(arrayify(UNIVERSAL_ROUTER));
 
   // per hop: <poolId 32B>
   for (let i = 0; i < tradePath.length - 1; i++) {
@@ -64,7 +61,7 @@ describe('UniSwapV4 — unit tests (Base mainnet fork)', async () => {
 
     // Deploy UniSwapV4 with admin as the proxy contract (bypasses onlyProxyContract)
     const factory = await ethers.getContractFactory('UniSwapV4');
-    uniSwapV4 = (await factory.deploy(admin.address, [UNIVERSAL_ROUTER])) as UniSwapV4;
+    uniSwapV4 = (await factory.deploy(admin.address, [UNIVERSAL_ROUTER], [STATE_VIEW], [NFPM])) as UniSwapV4;
     await uniSwapV4.deployed();
 
     // Register admin as the proxy so we can call swap/quote functions directly
@@ -133,9 +130,7 @@ describe('UniSwapV4 — unit tests (Base mainnet fork)', async () => {
       const fakeRouter = '0x000000000000000000000000000000000000dEaD';
       const badArgs =
         hexlify(arrayify(fakeRouter)) +
-        arrayify(STATE_VIEW).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '') +
-        computePoolId(ETH_V4, USDC_ADDRESS, DEFAULT_FEE, DEFAULT_TICK_SPACING).slice(2) +
-        (DEFAULT_TICK_SPACING & 0xffffff).toString(16).padStart(6, '0');
+        computePoolId(ETH_V4, USDC_ADDRESS, DEFAULT_FEE, DEFAULT_TICK_SPACING).slice(2);
 
       await expect(
         uniSwapV4.getExpectedReturn({
@@ -362,25 +357,46 @@ describe('UniSwapV4 — unit tests (Base mainnet fork)', async () => {
   // ── admin ──────────────────────────────────────────────────────────────────
 
   describe('admin', () => {
-    it('lists registered routers', async () => {
-      const routers = await uniSwapV4.getAllUniRouters();
+    it('lists registered routers with their bound stateView/nfpm', async () => {
+      const [routers, stateViews, nfpms] = await uniSwapV4.getAllUniRouters();
       assert.equal(routers.length, 1);
       assert.equal(routers[0].toLowerCase(), UNIVERSAL_ROUTER.toLowerCase());
+      assert.equal(stateViews[0].toLowerCase(), STATE_VIEW.toLowerCase());
+      assert.equal(nfpms[0].toLowerCase(), NFPM.toLowerCase());
     });
 
-    it('allows admin to add and remove routers', async () => {
+    it('allows admin to add and remove routers, binding stateView/nfpm per router', async () => {
       const newRouter = '0x1822946A4f1a625044d93a468DB6DB756d4f89Ff';
-      await uniSwapV4.updateUniRouters([newRouter], true);
-      let routers = await uniSwapV4.getAllUniRouters();
+      await uniSwapV4.updateUniRouters([newRouter], [STATE_VIEW], [NFPM], true);
+      let [routers, stateViews, nfpms] = await uniSwapV4.getAllUniRouters();
       assert(routers.map((r) => r.toLowerCase()).includes(newRouter.toLowerCase()), 'router should be added');
+      const addedIdx = routers.map((r) => r.toLowerCase()).indexOf(newRouter.toLowerCase());
+      assert.equal(stateViews[addedIdx].toLowerCase(), STATE_VIEW.toLowerCase());
+      assert.equal(nfpms[addedIdx].toLowerCase(), NFPM.toLowerCase());
 
-      await uniSwapV4.updateUniRouters([newRouter], false);
-      routers = await uniSwapV4.getAllUniRouters();
+      const cfg = await uniSwapV4.routerConfigs(newRouter);
+      assert.equal(cfg.stateView.toLowerCase(), STATE_VIEW.toLowerCase());
+      assert.equal(cfg.nfpm.toLowerCase(), NFPM.toLowerCase());
+
+      await uniSwapV4.updateUniRouters([newRouter], [STATE_VIEW], [NFPM], false);
+      [routers] = await uniSwapV4.getAllUniRouters();
       assert(!routers.map((r) => r.toLowerCase()).includes(newRouter.toLowerCase()), 'router should be removed');
+
+      const clearedCfg = await uniSwapV4.routerConfigs(newRouter);
+      assert.equal(clearedCfg.stateView, ethers.constants.AddressZero);
+      assert.equal(clearedCfg.nfpm, ethers.constants.AddressZero);
+    });
+
+    it('rejects adding a router with a zero stateView/nfpm', async () => {
+      const newRouter = '0x1822946A4f1a625044d93a468DB6DB756d4f89Ff';
+      await expect(
+        uniSwapV4.updateUniRouters([newRouter], [ethers.constants.AddressZero], [NFPM], true)
+      ).to.be.revertedWith('invalid router config');
     });
 
     it('rejects non-admin router update', async () => {
-      await expect(uniSwapV4.connect(user).updateUniRouters([UNIVERSAL_ROUTER], false)).to.be.reverted;
+      await expect(uniSwapV4.connect(user).updateUniRouters([UNIVERSAL_ROUTER], [STATE_VIEW], [NFPM], false)).to.be
+        .reverted;
     });
 
     it('rejects call to swap from non-proxy address', async () => {
