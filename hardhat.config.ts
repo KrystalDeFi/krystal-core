@@ -148,6 +148,14 @@ const config: HardhatUserConfig = {
           browserURL: 'https://testnet.hyperevmscan.io',
         },
       },
+      {
+        network: 'robinhood-chain',
+        chainId: 4663,
+        urls: {
+          apiURL: 'https://robinhoodchain.blockscout.com/api',
+          browserURL: 'https://robinhoodchain.blockscout.com',
+        },
+      },
     ],
   },
 
@@ -381,6 +389,14 @@ if (PRIVATE_KEY) {
     accounts: [PRIVATE_KEY],
     timeout: 20000,
     gasPrice: 0.2 * 1e9,
+  };
+
+  config.networks!.robinhood_mainnet = {
+    url: 'https://rpc.mainnet.chain.robinhood.com',
+    chainId: 4663,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 0.5 * 1e9,
   };
 }
 
