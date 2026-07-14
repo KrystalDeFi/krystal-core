@@ -104,47 +104,47 @@ export const deploy = async (
   log(0, 'Updating uniswapV3/clones config');
   log(0, '======================\n');
   await updateUniSwapV3(deployedContracts.swapContracts?.uniSwapV3, extraArgs);
-  // await updateUniSwapV3(deployedContracts.swapContracts?.uniSwapV3Bsc, extraArgs);
+  await updateUniSwapV3(deployedContracts.swapContracts?.uniSwapV3Bsc, extraArgs);
 
-  // log(0, 'Updating kyberProxy config');
-  // log(0, '======================\n');
-  // await updateKyberProxy(deployedContracts.swapContracts?.kyberProxy, extraArgs);
+  log(0, 'Updating kyberProxy config');
+  log(0, '======================\n');
+  await updateKyberProxy(deployedContracts.swapContracts?.kyberProxy, extraArgs);
 
-  // log(0, 'Updating kyberDmm config');
-  // log(0, '======================\n');
-  // await updateKyberDmm(deployedContracts.swapContracts?.kyberDmm, extraArgs);
+  log(0, 'Updating kyberDmm config');
+  log(0, '======================\n');
+  await updateKyberDmm(deployedContracts.swapContracts?.kyberDmm, extraArgs);
 
-  // log(0, 'Updating oneInch config');
-  // log(0, '======================\n');
-  // await updateOneInch(deployedContracts.swapContracts?.oneInch, extraArgs);
+  log(0, 'Updating oneInch config');
+  log(0, '======================\n');
+  await updateOneInch(deployedContracts.swapContracts?.oneInch, extraArgs);
 
-  // log(0, 'Updating openOcean config');
-  // log(0, '======================\n');
-  // await updateOpenOcean(deployedContracts.swapContracts?.openOcean, extraArgs);
+  log(0, 'Updating openOcean config');
+  log(0, '======================\n');
+  await updateOpenOcean(deployedContracts.swapContracts?.openOcean, extraArgs);
 
-  // log(0, 'Updating OKX config');
-  // log(0, '======================\n');
-  // await updateOkx(deployedContracts.swapContracts?.okx, extraArgs);
+  log(0, 'Updating OKX config');
+  log(0, '======================\n');
+  await updateOkx(deployedContracts.swapContracts?.okx, extraArgs);
 
   log(0, 'Updating uniswapUniversalRouter config');
   log(0, '======================\n');
   await updateUniswapUniversalRouter(deployedContracts.swapContracts?.uniswapUniversalRouter, extraArgs);
 
-  // log(0, 'Updating kyberDmm config');
-  // log(0, '======================\n');
-  // await updateKyberDmmV2(deployedContracts.swapContracts?.kyberDmmV2, extraArgs);
+  log(0, 'Updating kyberDmm config');
+  log(0, '======================\n');
+  await updateKyberDmmV2(deployedContracts.swapContracts?.kyberDmmV2, extraArgs);
 
-  // log(0, 'Updating kyberSwapv2 config');
-  // log(0, '======================\n');
-  // await updateKyberSwapV2(deployedContracts.swapContracts?.kyberSwapV2, extraArgs);
+  log(0, 'Updating kyberSwapv2 config');
+  log(0, '======================\n');
+  await updateKyberSwapV2(deployedContracts.swapContracts?.kyberSwapV2, extraArgs);
 
   log(0, 'Updating kyberSwapv3 config');
   log(0, '======================\n');
   await updateKyberSwapV3(deployedContracts.swapContracts?.kyberSwapV3, extraArgs);
 
-  // log(0, 'Updating velodrome config');
-  // log(0, '======================\n');
-  // await updateVelodrome(deployedContracts.swapContracts?.velodrome, extraArgs);
+  log(0, 'Updating velodrome config');
+  log(0, '======================\n');
+  await updateVelodrome(deployedContracts.swapContracts?.velodrome, extraArgs);
 
   // log(0, 'Updating compound/clones config');
   // log(0, '======================\n');
