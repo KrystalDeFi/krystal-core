@@ -324,6 +324,18 @@
     },
     "lendingContracts": {}
   },
+  "robinhood_mainnet": {
+    "smartWalletImplementation": "0x6a5D8cd4F3181bB85154C393fc6E9b62ce0A7ad4",
+    "smartWalletProxy": "0xeC04bAb6F0Fa7068a2eCD17EC70AA99b09e814b8",
+    "swapContracts": {
+      "uniSwap": "0xE37cDf244b73b5bBbd1cD7f97d34C989832778A4",
+      "uniSwapV3": "0x6795A3b0d755946B29c45631d76d63EF6683DbDE",
+      "uniSwapV3Bsc": "0x1AF3f25F8AE268680Bb8351a8457bBfD63514e11",
+      "uniswapUniversalRouter": "0x99b4Dcc3a6fe2EEE7DccB932248916A533bE0989",
+      "kyberSwapV3": "0xB9B207A77c84556eb6e02D2C0E7873BcF4E9c8d5"
+    },
+    "lendingContracts": {}
+  },
   "sonic_mainnet": {
     "smartWalletImplementation": "0xeC04bAb6F0Fa7068a2eCD17EC70AA99b09e814b8",
     "smartWalletProxy": "0x6EE8626EC13Acb0E9208CBFc45176964dfaD06ea",
