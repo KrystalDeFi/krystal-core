@@ -22,6 +22,12 @@ export const RobinhoodConfig: Record<string, IConfig> = {
       ],
     },
 
+    uniSwapV3Bsc: {
+      routers: [
+        '0xCaf681a66D020601342297493863E78C959E5cb2', // univ3
+      ],
+    },
+
     uniswap: {
       routers: {
         univ2: {
