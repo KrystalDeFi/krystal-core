@@ -30,7 +30,7 @@ export const BaseConfig: Record<string, IConfig> = {
     },
 
     okx: {
-      router: '0xC8F6b8Ba0DC0f175B568B99440B0867F69A29265',
+      router: '0x67d03631fe51b741c0c00c4e16eb662ac84381df',
       okxTokenApprove: '0x57df6092665eb6058DE53939612413ff4B09114E',
     },
 
