@@ -81,7 +81,7 @@ const config: HardhatUserConfig = {
   etherscan: {
     // Your API key for bscscan / ethscan
     // Obtain one at https://bscscan.io/
-    apiKey: ETHERSCAN_KEY as string,
+    apiKey: ETHERSCAN_KEY,
 
     customChains: [
       {
@@ -148,6 +148,14 @@ const config: HardhatUserConfig = {
           browserURL: 'https://testnet.hyperevmscan.io',
         },
       },
+      {
+        network: 'robinhood-chain',
+        chainId: 4663,
+        urls: {
+          apiURL: 'https://robinhoodchain.blockscout.com/api',
+          browserURL: 'https://robinhoodchain.blockscout.com',
+        },
+      },
     ],
   },
 
@@ -186,7 +194,7 @@ if (PRIVATE_KEY) {
     chainId: 56,
     accounts: [PRIVATE_KEY],
     timeout: 20000,
-    gasPrice: 3 * 1e9,
+    gasPrice: 0.05 * 1e9,
   };
 
   config.networks!.bsc_staging = {
@@ -225,7 +233,7 @@ if (PRIVATE_KEY) {
     chainId: 42161,
     accounts: [PRIVATE_KEY],
     timeout: 20000,
-    gasPrice: 0.1 * 1e9,
+    gasPrice: 0.03 * 1e9,
   };
 
   config.networks!.arbitrum_rinkeby = {
@@ -297,7 +305,7 @@ if (PRIVATE_KEY) {
     chainId: 1,
     accounts: [PRIVATE_KEY],
     timeout: 20000,
-    gasPrice: 18 * 1e9,
+    gasPrice: 0.3 * 1e9,
   };
 
   config.networks!.eth_goerli = {
@@ -378,6 +386,14 @@ if (PRIVATE_KEY) {
     accounts: [PRIVATE_KEY],
     timeout: 20000,
     gasPrice: 0.2 * 1e9,
+  };
+
+  config.networks!.robinhood_mainnet = {
+    url: 'https://rpc.mainnet.chain.robinhood.com',
+    chainId: 4663,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 0.5 * 1e9,
   };
 }
 

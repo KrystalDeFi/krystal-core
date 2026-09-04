@@ -45,6 +45,11 @@ export const BaseConfig: Record<string, IConfig> = {
       testingTokens: ['usdc', 'cbbtc'],
     },
 
+    uniswapUniversalRouter: {
+      swapProxy: '0x0000000085E102724e78eCd2F45DC9cA239Affad',
+      universalRouter: '0x6fF5693b99212Da76ad316178A184AB56D299b43',
+    },
+
     supportedWallets: commonPlatformWallets,
     nativeUsdRate: 2020,
 

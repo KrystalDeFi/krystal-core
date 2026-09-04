@@ -16,6 +16,7 @@ import {SonicConfig} from './config_sonic';
 import {BerachainConfig} from './config_berachain';
 import {UnichainConfig} from './config_unichain';
 import {HyperevmConfig} from './config_hyperevm';
+import {RobinhoodConfig} from './config_robinhood';
 
 const NetworkConfig: Record<string, IConfig> = {
   ...BscConfig,
@@ -34,6 +35,7 @@ const NetworkConfig: Record<string, IConfig> = {
   ...BerachainConfig,
   ...UnichainConfig,
   ...HyperevmConfig,
+  ...RobinhoodConfig,
 };
 
 NetworkConfig.hardhat = {

@@ -25,6 +25,7 @@ import {
   OpenOcean,
   Okx,
   UniSwapV4,
+  UniswapUniversalRouter,
 } from '../typechain';
 import {Contract} from '@ethersproject/contracts';
 import {IAaveV2Config} from './config_utils';
@@ -64,6 +65,7 @@ export interface KrystalContracts {
     openOcean?: OpenOcean;
     okx?: Okx;
     uniSwapV4?: UniSwapV4;
+    uniswapUniversalRouter?: UniswapUniversalRouter;
   };
   lendingContracts?: {
     compoundLending?: CompoundLending;
@@ -125,6 +127,10 @@ export const deploy = async (
   log(0, 'Updating OKX config');
   log(0, '======================\n');
   await updateOkx(deployedContracts.swapContracts?.okx, extraArgs);
+
+  log(0, 'Updating uniswapUniversalRouter config');
+  log(0, '======================\n');
+  await updateUniswapUniversalRouter(deployedContracts.swapContracts?.uniswapUniversalRouter, extraArgs);
 
   log(0, 'Updating kyberDmm config');
   log(0, '======================\n');
@@ -323,6 +329,19 @@ async function deployContracts(
             networkConfig.okx.router,
             networkConfig.okx.okxTokenApprove
           )) as Okx),
+
+      uniswapUniversalRouter: !networkConfig.uniswapUniversalRouter
+        ? undefined
+        : ((await deployContract(
+            ++step,
+            networkConfig.autoVerifyContract,
+            'UniswapUniversalRouter',
+            existingContract?.['swapContracts']?.['uniswapUniversalRouter'],
+            undefined,
+            contractAdmin,
+            networkConfig.uniswapUniversalRouter.swapProxy,
+            networkConfig.uniswapUniversalRouter.universalRouter
+          )) as UniswapUniversalRouter),
 
       kyberDmmV2: !networkConfig.kyberDmmV2
         ? undefined
@@ -800,6 +819,45 @@ async function updateOkx(okx: Okx | undefined, extraArgs: {from?: string}) {
       await okx.populateTransaction.updateAggregationRouter(networkConfig.okx.router)
     );
     log(2, '> updated OKX', JSON.stringify(networkConfig.okx, null, 2));
+    await printInfo(tx);
+  }
+}
+
+async function updateUniswapUniversalRouter(
+  uniswapUniversalRouter: UniswapUniversalRouter | undefined,
+  extraArgs: {from?: string}
+) {
+  if (!uniswapUniversalRouter || !networkConfig.uniswapUniversalRouter) {
+    log(1, 'protocol not supported on this env');
+    return;
+  }
+  log(1, 'update swapProxy/universalRouter');
+
+  if (
+    (await uniswapUniversalRouter.swapProxy()).toLowerCase() ===
+    networkConfig.uniswapUniversalRouter.swapProxy.toLowerCase()
+  ) {
+    log(2, `swapProxy already up-to-date at ${networkConfig.uniswapUniversalRouter.swapProxy}`);
+  } else {
+    const tx = await executeTxnOnBehalfOf(
+      await uniswapUniversalRouter.populateTransaction.updateSwapProxy(networkConfig.uniswapUniversalRouter.swapProxy)
+    );
+    log(2, '> updated swapProxy', networkConfig.uniswapUniversalRouter.swapProxy);
+    await printInfo(tx);
+  }
+
+  if (
+    (await uniswapUniversalRouter.universalRouter()).toLowerCase() ===
+    networkConfig.uniswapUniversalRouter.universalRouter.toLowerCase()
+  ) {
+    log(2, `universalRouter already up-to-date at ${networkConfig.uniswapUniversalRouter.universalRouter}`);
+  } else {
+    const tx = await executeTxnOnBehalfOf(
+      await uniswapUniversalRouter.populateTransaction.updateUniversalRouter(
+        networkConfig.uniswapUniversalRouter.universalRouter
+      )
+    );
+    log(2, '> updated universalRouter', networkConfig.uniswapUniversalRouter.universalRouter);
     await printInfo(tx);
   }
 }

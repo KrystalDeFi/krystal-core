@@ -34,6 +34,11 @@ export const ArbitrumConfig: Record<string, IConfig> = {
       router: '0x617Dee16B86534a5d792A4d7A62FB491B544111E',
     },
 
+    uniswapUniversalRouter: {
+      swapProxy: '0x0000000085E102724e78eCd2F45DC9cA239Affad',
+      universalRouter: '0xA51afAFe0263b40EdaEf0Df8781eA9aa03E381a3',
+    },
+
     supportedWallets: commonPlatformWallets,
     nativeUsdRate: 2500,
   },

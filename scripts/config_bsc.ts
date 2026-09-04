@@ -79,6 +79,11 @@ export const BscConfig: Record<string, IConfig> = {
       okxTokenApprove: '0x2c34A2Fb1d0b4f55de51E1d0bDEfaDDce6b7cDD6',
     },
 
+    uniswapUniversalRouter: {
+      swapProxy: '0x0000000085E102724e78eCd2F45DC9cA239Affad',
+      universalRouter: '0x1906c1d672b88cD1B9aC7593301cA990F94Eae07',
+    },
+
     // Venus protocol
     compound: {
       compTroller: '0xfd36e2c2a6789db23113685031d7f16329158384',
