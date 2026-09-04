@@ -36,6 +36,11 @@ export const RobinhoodConfig: Record<string, IConfig> = {
       },
     },
 
+    okx: {
+      router: '0x6e2a35a7ad683cf634d91492d73bb7ff774c6919',
+      okxTokenApprove: '0x42170295F1173c9e5874ea9d00c6d137E1a4f53d',
+    },
+
     supportedWallets: commonPlatformWallets,
     nativeUsdRate: 2530,
 

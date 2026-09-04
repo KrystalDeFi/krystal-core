@@ -81,7 +81,7 @@ const config: HardhatUserConfig = {
   etherscan: {
     // Your API key for bscscan / ethscan
     // Obtain one at https://bscscan.io/
-    apiKey: ETHERSCAN_KEY as string,
+    apiKey: ETHERSCAN_KEY,
 
     customChains: [
       {
@@ -396,7 +396,7 @@ if (PRIVATE_KEY) {
     chainId: 4663,
     accounts: [PRIVATE_KEY],
     timeout: 20000,
-    gasPrice: 0.5 * 1e9,
+    gasPrice: 0.82 * 1e9,
   };
 }
 
