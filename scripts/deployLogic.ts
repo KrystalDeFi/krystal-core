@@ -542,8 +542,8 @@ async function deployContract(
   }
 
   // Only verify new contract to save time
-  if (autoVerify && !contractAddress) {
-    // if (autoVerify && contractAddress == "0x2098E00879a049303cF1545a8EbB02b5c469bdAa") {
+  // if (autoVerify && !contractAddress) {
+  if (autoVerify && contractAddress == '0xC6c43491BDD1ff455A507f2c1956d616bb417A1D') {
     try {
       log(3, '>> sleep first, wait for contract data to be propagated');
       await sleep(5000);
