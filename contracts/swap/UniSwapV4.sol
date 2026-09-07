@@ -536,6 +536,29 @@ contract UniSwapV4 is BaseSwap {
             });
     }
 
+    /// @dev Encodes SWAP_EXACT_IN_SINGLE's ExactInputSingleParams. This struct contains a dynamic
+    ///      member (hookData), so CalldataDecoder.decodeSwapExactInSingleParams reads it as a single
+    ///      dynamic value: params[0..32) must hold an offset (0x20) to the actual tuple, exactly like
+    ///      abi.decode(data, (T)) for a dynamic T. Without this leading offset word, the decoder reads
+    ///      poolKey.currency0 itself as that offset — which coincidentally is 0 (a no-op offset) only
+    ///      when currency0 is native ETH (address(0)); for any ERC20-ERC20 pool it corrupts the decode.
+    function _encodeExactInputSingleParams(
+        PoolKey memory poolKey,
+        bool zeroForOne,
+        uint256 srcAmount,
+        uint256 minDestAmount
+    ) private pure returns (bytes memory) {
+        bytes memory exactInputSingleParams = abi.encode(
+            poolKey,
+            zeroForOne,
+            toUint128(srcAmount),
+            toUint128(minDestAmount),
+            uint256(0), // minHopPriceX36 — no price limit
+            bytes("") // hookData
+        );
+        return abi.encodePacked(uint256(0x20), exactInputSingleParams);
+    }
+
     function swapExactInputSingle(
         IUniversalRouterV4 router,
         INFPM nfpm,
@@ -560,14 +583,11 @@ contract UniSwapV4 is BaseSwap {
         );
 
         bytes[] memory actionParams = new bytes[](3);
-        // SWAP_EXACT_IN_SINGLE params: ExactInputSingleParams
-        actionParams[0] = abi.encode(
+        actionParams[0] = _encodeExactInputSingleParams(
             poolKey,
             zeroForOne,
-            toUint128(srcAmount),
-            toUint128(minDestAmount),
-            uint256(0), // minHopPriceX36 — no price limit
-            bytes("") // hookData
+            srcAmount,
+            minDestAmount
         );
         // SETTLE params: (currency, amount, payerIsUser=false) — settle from router's own balance
         actionParams[1] = abi.encode(currency0, srcAmount, false);
@@ -582,6 +602,27 @@ contract UniSwapV4 is BaseSwap {
             inputs,
             MAX_AMOUNT
         );
+    }
+
+    /// @dev Encodes SWAP_EXACT_IN's ExactInputParams. This struct contains dynamic members (path,
+    ///      minHopPriceX36), so — same reasoning as _encodeExactInputSingleParams above — it needs a
+    ///      leading offset word (0x20) for CalldataDecoder.decodeSwapExactInParams to locate the
+    ///      tuple correctly.
+    function _encodeExactInputParams(
+        address currencyIn,
+        PathKey[] memory path,
+        uint256[] memory minHopPrices,
+        uint256 srcAmount,
+        uint256 minDestAmount
+    ) private pure returns (bytes memory) {
+        bytes memory exactInputParams = abi.encode(
+            currencyIn,
+            path,
+            minHopPrices,
+            toUint128(srcAmount),
+            toUint128(minDestAmount)
+        );
+        return abi.encodePacked(uint256(0x20), exactInputParams);
     }
 
     function swapExactInput(
@@ -614,13 +655,12 @@ contract UniSwapV4 is BaseSwap {
 
         uint256[] memory minHopPrices = new uint256[](poolIds.length); // all zeros — no hop price limits
         bytes[] memory actionParams = new bytes[](3);
-        // SWAP_EXACT_IN params: ExactInputParams (currencyIn, PathKey[], minHopPriceX36[], amountIn, amountOutMinimum)
-        actionParams[0] = abi.encode(
+        actionParams[0] = _encodeExactInputParams(
             currencyIn,
             path,
             minHopPrices,
-            toUint128(a.srcAmount),
-            toUint128(a.minDestAmount)
+            a.srcAmount,
+            a.minDestAmount
         );
         // SETTLE params: (currency, amount, payerIsUser=false) — settle from router's own balance
         actionParams[1] = abi.encode(currencyIn, a.srcAmount, false);

@@ -11,6 +11,7 @@ const UNIVERSAL_ROUTER = '0xFdf682F51FE81Aa4898F0AE2163d8A55c127fbC7';
 const STATE_VIEW = '0xA3c0c9b65baD0b08107Aa264b0f3dB444b867A71';
 const NFPM = '0x7c5f5a4bbd8fd63184577525326123b519429bdc';
 const USDC_ADDRESS = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+const USDbC_ADDRESS = '0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca';
 const cbBTC_ADDRESS = '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf';
 const ETH_V4 = '0x0000000000000000000000000000000000000000'; // V4 native ETH
 
@@ -49,6 +50,7 @@ describe('UniSwapV4 — unit tests (Base mainnet fork)', async () => {
   let user: SignerWithAddress;
   let uniSwapV4: UniSwapV4;
   let usdc: IERC20Ext;
+  let usdbc: IERC20Ext;
   let snapshotId: any;
 
   // $10 worth of ETH at ~$2000/ETH
@@ -68,6 +70,7 @@ describe('UniSwapV4 — unit tests (Base mainnet fork)', async () => {
     await uniSwapV4.updateProxyContract(admin.address);
 
     usdc = (await ethers.getContractAt('IERC20Ext', USDC_ADDRESS)) as IERC20Ext;
+    usdbc = (await ethers.getContractAt('IERC20Ext', USDbC_ADDRESS)) as IERC20Ext;
 
     snapshotId = await evm_snapshot();
   });
@@ -351,6 +354,153 @@ describe('UniSwapV4 — unit tests (Base mainnet fork)', async () => {
           {value: ethAmountIn}
         )
       ).to.be.reverted;
+    });
+
+    it('swaps USDC → USDbC and delivers USDbC to recipient', async () => {
+      // USDC/USDbC pool lives at the 0.01% fee tier (tickSpacing 1) on Base
+      const stableFee = 100;
+      const stableTickSpacing = 1;
+
+      // Acquire USDC first by swapping ETH → USDC
+      const ethToUsdcPath = [nativeTokenAddress, USDC_ADDRESS];
+      const ethToUsdcArgs = buildExtraArgs(ethToUsdcPath);
+      const usdcQuote = await uniSwapV4.getExpectedReturn({
+        srcAmount: ethAmountIn,
+        tradePath: ethToUsdcPath,
+        feeBps: 0,
+        extraArgs: ethToUsdcArgs,
+      });
+      await uniSwapV4.swap(
+        {
+          srcAmount: ethAmountIn,
+          minDestAmount: usdcQuote.mul(97).div(100),
+          tradePath: ethToUsdcPath,
+          recipient: admin.address,
+          feeBps: 0,
+          feeReceiver: admin.address,
+          extraArgs: ethToUsdcArgs,
+        },
+        {value: ethAmountIn}
+      );
+
+      const usdcBalance = await usdc.balanceOf(admin.address);
+      assert(usdcBalance.gt(0), 'need USDC to test USDC → USDbC swap');
+
+      // Fund the UniSwapV4 contract with USDC (proxy does this normally)
+      await usdc.transfer(uniSwapV4.address, usdcBalance);
+
+      const tradePath = [USDC_ADDRESS, USDbC_ADDRESS];
+      const extraArgs = buildExtraArgs(tradePath, stableFee, stableTickSpacing);
+
+      const destAmount = await uniSwapV4.getExpectedReturn({
+        srcAmount: usdcBalance,
+        tradePath,
+        feeBps: 0,
+        extraArgs,
+      });
+      const minDestAmount = destAmount.mul(97).div(100); // 3% slippage
+
+      const usdbcBefore = await usdbc.balanceOf(user.address);
+
+      await uniSwapV4.swap({
+        srcAmount: usdcBalance,
+        minDestAmount,
+        tradePath,
+        recipient: user.address,
+        feeBps: 0,
+        feeReceiver: admin.address,
+        extraArgs,
+      });
+
+      const usdbcAfter = await usdbc.balanceOf(user.address);
+      const received = usdbcAfter.sub(usdbcBefore);
+      assert(received.gte(minDestAmount), `received ${received} USDbC < minDestAmount ${minDestAmount}`);
+      console.log(`  Received: ${received} USDbC`);
+    });
+
+    it('swaps USDbC → USDC and delivers USDC to recipient', async () => {
+      // USDC/USDbC pool lives at the 0.01% fee tier (tickSpacing 1) on Base
+      const stableFee = 100;
+      const stableTickSpacing = 1;
+
+      // Acquire USDC first by swapping ETH → USDC
+      const ethToUsdcPath = [nativeTokenAddress, USDC_ADDRESS];
+      const ethToUsdcArgs = buildExtraArgs(ethToUsdcPath);
+      const usdcQuote = await uniSwapV4.getExpectedReturn({
+        srcAmount: ethAmountIn,
+        tradePath: ethToUsdcPath,
+        feeBps: 0,
+        extraArgs: ethToUsdcArgs,
+      });
+      await uniSwapV4.swap(
+        {
+          srcAmount: ethAmountIn,
+          minDestAmount: usdcQuote.mul(97).div(100),
+          tradePath: ethToUsdcPath,
+          recipient: admin.address,
+          feeBps: 0,
+          feeReceiver: admin.address,
+          extraArgs: ethToUsdcArgs,
+        },
+        {value: ethAmountIn}
+      );
+
+      // Convert that USDC into USDbC so we have USDbC to swap back
+      const usdcBalance = await usdc.balanceOf(admin.address);
+      assert(usdcBalance.gt(0), 'need USDC to seed USDbC balance');
+      await usdc.transfer(uniSwapV4.address, usdcBalance);
+
+      const usdcToUsdbcPath = [USDC_ADDRESS, USDbC_ADDRESS];
+      const usdcToUsdbcArgs = buildExtraArgs(usdcToUsdbcPath, stableFee, stableTickSpacing);
+      const usdbcQuote = await uniSwapV4.getExpectedReturn({
+        srcAmount: usdcBalance,
+        tradePath: usdcToUsdbcPath,
+        feeBps: 0,
+        extraArgs: usdcToUsdbcArgs,
+      });
+      await uniSwapV4.swap({
+        srcAmount: usdcBalance,
+        minDestAmount: usdbcQuote.mul(97).div(100),
+        tradePath: usdcToUsdbcPath,
+        recipient: admin.address,
+        feeBps: 0,
+        feeReceiver: admin.address,
+        extraArgs: usdcToUsdbcArgs,
+      });
+
+      const usdbcBalance = await usdbc.balanceOf(admin.address);
+      assert(usdbcBalance.gt(0), 'need USDbC to test USDbC → USDC swap');
+
+      // Fund the UniSwapV4 contract with USDbC (proxy does this normally)
+      await usdbc.transfer(uniSwapV4.address, usdbcBalance);
+
+      const tradePath = [USDbC_ADDRESS, USDC_ADDRESS];
+      const extraArgs = buildExtraArgs(tradePath, stableFee, stableTickSpacing);
+
+      const destAmount = await uniSwapV4.getExpectedReturn({
+        srcAmount: usdbcBalance,
+        tradePath,
+        feeBps: 0,
+        extraArgs,
+      });
+      const minDestAmount = destAmount.mul(97).div(100); // 3% slippage
+
+      const usdcBefore = await usdc.balanceOf(user.address);
+
+      await uniSwapV4.swap({
+        srcAmount: usdbcBalance,
+        minDestAmount,
+        tradePath,
+        recipient: user.address,
+        feeBps: 0,
+        feeReceiver: admin.address,
+        extraArgs,
+      });
+
+      const usdcAfter = await usdc.balanceOf(user.address);
+      const received = usdcAfter.sub(usdcBefore);
+      assert(received.gte(minDestAmount), `received ${received} USDC < minDestAmount ${minDestAmount}`);
+      console.log(`  Received: ${received} USDC`);
     });
   });
 
