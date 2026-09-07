@@ -804,6 +804,11 @@ contract UniSwapV4 is BaseSwap {
             }
         }
 
+        require(
+            cfg.exactInput || state.amountSpecifiedRemaining == 0,
+            "insufficient liquidity for exact output"
+        );
+
         amount = state.amountCalculated < 0
             ? uint256(-state.amountCalculated)
             : uint256(state.amountCalculated);
