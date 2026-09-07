@@ -28,7 +28,13 @@ function computePoolId(c0: string, c1: string, fee: number, tickSpacing: number)
   );
 }
 
-function buildExtraArgs(tradePath: string[], fee = DEFAULT_FEE, tickSpacing = DEFAULT_TICK_SPACING): string {
+// fee/tickSpacing may be a single value applied to every hop, or a per-hop array (for multi-hop
+// paths where hops live in different pools/fee tiers).
+function buildExtraArgs(
+  tradePath: string[],
+  fee: number | number[] = DEFAULT_FEE,
+  tickSpacing: number | number[] = DEFAULT_TICK_SPACING
+): string {
   // header: <router 20B> — stateView/nfpm are bound to the router via routerConfigs, not extraArgs
   let args = hexlify(arrayify(UNIVERSAL_ROUTER));
 
@@ -36,8 +42,9 @@ function buildExtraArgs(tradePath: string[], fee = DEFAULT_FEE, tickSpacing = DE
   for (let i = 0; i < tradePath.length - 1; i++) {
     const c0 = tradePath[i].toLowerCase() === nativeTokenAddress.toLowerCase() ? ETH_V4 : tradePath[i];
     const c1 = tradePath[i + 1].toLowerCase() === nativeTokenAddress.toLowerCase() ? ETH_V4 : tradePath[i + 1];
-    const poolId = computePoolId(c0, c1, fee, tickSpacing);
-    console.log(`Hop ${i}: ${tradePath[i]} → ${tradePath[i + 1]}, poolId: ${poolId}`);
+    const hopFee = Array.isArray(fee) ? fee[i] : fee;
+    const hopTickSpacing = Array.isArray(tickSpacing) ? tickSpacing[i] : tickSpacing;
+    const poolId = computePoolId(c0, c1, hopFee, hopTickSpacing);
     args += poolId.slice(2); // strip 0x
   }
   return args;
@@ -51,6 +58,7 @@ describe('UniSwapV4 — unit tests (Base mainnet fork)', async () => {
   let uniSwapV4: UniSwapV4;
   let usdc: IERC20Ext;
   let usdbc: IERC20Ext;
+  let cbbtc: IERC20Ext;
   let snapshotId: any;
 
   // $10 worth of ETH at ~$2000/ETH
@@ -71,6 +79,7 @@ describe('UniSwapV4 — unit tests (Base mainnet fork)', async () => {
 
     usdc = (await ethers.getContractAt('IERC20Ext', USDC_ADDRESS)) as IERC20Ext;
     usdbc = (await ethers.getContractAt('IERC20Ext', USDbC_ADDRESS)) as IERC20Ext;
+    cbbtc = (await ethers.getContractAt('IERC20Ext', cbBTC_ADDRESS)) as IERC20Ext;
 
     snapshotId = await evm_snapshot();
   });
@@ -496,6 +505,182 @@ describe('UniSwapV4 — unit tests (Base mainnet fork)', async () => {
         feeReceiver: admin.address,
         extraArgs,
       });
+
+      const usdcAfter = await usdc.balanceOf(user.address);
+      const received = usdcAfter.sub(usdcBefore);
+      assert(received.gte(minDestAmount), `received ${received} USDC < minDestAmount ${minDestAmount}`);
+      console.log(`  Received: ${received} USDC`);
+    });
+
+    it('swaps USDC → ETH → cbBTC (2 hops) and delivers cbBTC to recipient', async () => {
+      // Both hops sit at the default 0.3% fee tier (tickSpacing 60) on Base.
+      // Acquire USDC first by swapping ETH → USDC
+      const ethToUsdcPath = [nativeTokenAddress, USDC_ADDRESS];
+      const ethToUsdcArgs = buildExtraArgs(ethToUsdcPath);
+      const usdcQuote = await uniSwapV4.getExpectedReturn({
+        srcAmount: ethAmountIn,
+        tradePath: ethToUsdcPath,
+        feeBps: 0,
+        extraArgs: ethToUsdcArgs,
+      });
+      await uniSwapV4.swap(
+        {
+          srcAmount: ethAmountIn,
+          minDestAmount: usdcQuote.mul(97).div(100),
+          tradePath: ethToUsdcPath,
+          recipient: admin.address,
+          feeBps: 0,
+          feeReceiver: admin.address,
+          extraArgs: ethToUsdcArgs,
+        },
+        {value: ethAmountIn}
+      );
+
+      const usdcBalance = await usdc.balanceOf(admin.address);
+      assert(usdcBalance.gt(0), 'need USDC to test multi-hop swap');
+      await usdc.transfer(uniSwapV4.address, usdcBalance);
+
+      const tradePath = [USDC_ADDRESS, nativeTokenAddress, cbBTC_ADDRESS];
+      const extraArgs = buildExtraArgs(tradePath); // both hops use the default fee/tickSpacing
+
+      const destAmount = await uniSwapV4.getExpectedReturn({
+        srcAmount: usdcBalance,
+        tradePath,
+        feeBps: 0,
+        extraArgs,
+      });
+      const minDestAmount = destAmount.mul(97).div(100); // 3% slippage
+
+      const cbbtcBefore = await cbbtc.balanceOf(user.address);
+
+      await uniSwapV4.swap({
+        srcAmount: usdcBalance,
+        minDestAmount,
+        tradePath,
+        recipient: user.address,
+        feeBps: 0,
+        feeReceiver: admin.address,
+        extraArgs,
+      });
+
+      const cbbtcAfter = await cbbtc.balanceOf(user.address);
+      const received = cbbtcAfter.sub(cbbtcBefore);
+      assert(received.gte(minDestAmount), `received ${received} cbBTC < minDestAmount ${minDestAmount}`);
+      console.log(`  Received: ${received} cbBTC (raw)`);
+    });
+
+    it('swaps USDbC → USDC → ETH (2 hops) and delivers ETH to recipient', async () => {
+      // USDbC/USDC hop sits at the 0.01% fee tier (tickSpacing 1); USDC/ETH hop uses the default tier.
+      const hopFees = [100, DEFAULT_FEE];
+      const hopTickSpacings = [1, DEFAULT_TICK_SPACING];
+
+      // Acquire USDbC: ETH → USDC → USDbC
+      const ethToUsdcPath = [nativeTokenAddress, USDC_ADDRESS];
+      const ethToUsdcArgs = buildExtraArgs(ethToUsdcPath);
+      const usdcQuote = await uniSwapV4.getExpectedReturn({
+        srcAmount: ethAmountIn,
+        tradePath: ethToUsdcPath,
+        feeBps: 0,
+        extraArgs: ethToUsdcArgs,
+      });
+      await uniSwapV4.swap(
+        {
+          srcAmount: ethAmountIn,
+          minDestAmount: usdcQuote.mul(97).div(100),
+          tradePath: ethToUsdcPath,
+          recipient: admin.address,
+          feeBps: 0,
+          feeReceiver: admin.address,
+          extraArgs: ethToUsdcArgs,
+        },
+        {value: ethAmountIn}
+      );
+
+      const usdcBalance = await usdc.balanceOf(admin.address);
+      assert(usdcBalance.gt(0), 'need USDC to seed USDbC balance');
+      await usdc.transfer(uniSwapV4.address, usdcBalance);
+
+      const usdcToUsdbcPath = [USDC_ADDRESS, USDbC_ADDRESS];
+      const usdcToUsdbcArgs = buildExtraArgs(usdcToUsdbcPath, 100, 1);
+      const usdbcQuote = await uniSwapV4.getExpectedReturn({
+        srcAmount: usdcBalance,
+        tradePath: usdcToUsdbcPath,
+        feeBps: 0,
+        extraArgs: usdcToUsdbcArgs,
+      });
+      await uniSwapV4.swap({
+        srcAmount: usdcBalance,
+        minDestAmount: usdbcQuote.mul(97).div(100),
+        tradePath: usdcToUsdbcPath,
+        recipient: admin.address,
+        feeBps: 0,
+        feeReceiver: admin.address,
+        extraArgs: usdcToUsdbcArgs,
+      });
+
+      const usdbcBalance = await usdbc.balanceOf(admin.address);
+      assert(usdbcBalance.gt(0), 'need USDbC to test multi-hop swap');
+      await usdbc.transfer(uniSwapV4.address, usdbcBalance);
+
+      const tradePath = [USDbC_ADDRESS, USDC_ADDRESS, nativeTokenAddress];
+      const extraArgs = buildExtraArgs(tradePath, hopFees, hopTickSpacings);
+
+      const destAmount = await uniSwapV4.getExpectedReturn({
+        srcAmount: usdbcBalance,
+        tradePath,
+        feeBps: 0,
+        extraArgs,
+      });
+      const minDestAmount = destAmount.mul(97).div(100); // 3% slippage
+
+      const ethBefore = await ethers.provider.getBalance(user.address);
+
+      await uniSwapV4.swap({
+        srcAmount: usdbcBalance,
+        minDestAmount,
+        tradePath,
+        recipient: user.address,
+        feeBps: 0,
+        feeReceiver: admin.address,
+        extraArgs,
+      });
+
+      const ethAfter = await ethers.provider.getBalance(user.address);
+      const received = ethAfter.sub(ethBefore);
+      assert(received.gte(minDestAmount), `received ${ethers.utils.formatEther(received)} ETH < minDestAmount`);
+      console.log(`  Received: ${ethers.utils.formatEther(received)} ETH`);
+    });
+
+    it('swaps ETH → USDbC → USDC (2 hops) and delivers USDC to recipient', async () => {
+      // ETH/USDbC hop uses the default fee tier; USDbC/USDC hop sits at the 0.01% fee tier (tickSpacing 1).
+      const hopFees = [DEFAULT_FEE, 100];
+      const hopTickSpacings = [DEFAULT_TICK_SPACING, 1];
+
+      const tradePath = [nativeTokenAddress, USDbC_ADDRESS, USDC_ADDRESS];
+      const extraArgs = buildExtraArgs(tradePath, hopFees, hopTickSpacings);
+
+      const destAmount = await uniSwapV4.getExpectedReturn({
+        srcAmount: ethAmountIn,
+        tradePath,
+        feeBps: 0,
+        extraArgs,
+      });
+      const minDestAmount = destAmount.mul(97).div(100); // 3% slippage
+
+      const usdcBefore = await usdc.balanceOf(user.address);
+
+      await uniSwapV4.swap(
+        {
+          srcAmount: ethAmountIn,
+          minDestAmount,
+          tradePath,
+          recipient: user.address,
+          feeBps: 0,
+          feeReceiver: admin.address,
+          extraArgs,
+        },
+        {value: ethAmountIn}
+      );
 
       const usdcAfter = await usdc.balanceOf(user.address);
       const received = usdcAfter.sub(usdcBefore);
