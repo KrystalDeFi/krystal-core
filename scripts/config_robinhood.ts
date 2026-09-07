@@ -28,6 +28,16 @@ export const RobinhoodConfig: Record<string, IConfig> = {
       ],
     },
 
+    uniswapV4: {
+      routers: [
+        {
+          router: '0x8876789976decbfcbbbe364623c63652db8c0904',
+          stateView: '0xf3334192d15450cdd385c8b70e03f9a6bd9e673b',
+          nfpm: '0x58daec3116aae6d93017baaea7749052e8a04fa7',
+        },
+      ],
+    },
+
     uniswap: {
       routers: {
         univ2: {
