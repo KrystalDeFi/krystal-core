@@ -12,7 +12,7 @@ export const UnichainConfig: Record<string, IConfig> = {
     },
 
     okx: {
-      router: '0xA3d7C702e6Fa835504B4a9649F422d1DdC6995E3',
+      router: '0x6733Eb2E75B1625F1Fe5f18aD2cB2BaBDA510d19',
       okxTokenApprove: '0x2e28281Cf3D58f475cebE27bec4B8a23dFC7782c',
     },
 

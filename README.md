@@ -54,6 +54,8 @@ where:
     -f  specific test to run if any
 ```
 
+3. For UniswapV4 run `CHAIN=base NETWORK=mainnet yarn hardhat test --network hardhat test/uniswapV4.test.ts`
+
 ## Deploying
 
 1. Run `yarn deploy -h` for instruction

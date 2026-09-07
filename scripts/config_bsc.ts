@@ -75,7 +75,7 @@ export const BscConfig: Record<string, IConfig> = {
     },
 
     okx: {
-      router: '0x9333C74BDd1E118634fE5664ACA7a9710b108Bab',
+      router: '0x5994814f2c4040b863a0125a45de152a8c2a4dec',
       okxTokenApprove: '0x2c34A2Fb1d0b4f55de51E1d0bDEfaDDce6b7cDD6',
     },
 

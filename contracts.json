@@ -69,8 +69,9 @@
     "swapContracts": {
       "uniSwapV3Bsc": "0x3f768398d267ace37ee18a54c4F9061fe9B2D418",
       "okx": "0x00bFDDFdB386a71E2FB1d1763e3D1f0F1FE8aF64",
+      "uniswapUniversalRouter": "0x6B4948E63334816614966214166E3d1F530c1862",
       "kyberSwapV3": "0xFd3808ac5791Bc0DECef2354c3C670F90ea7cA8d",
-      "uniswapUniversalRouter": "0x6B4948E63334816614966214166E3d1F530c1862"
+      "uniSwapV4": "0xC6c43491BDD1ff455A507f2c1956d616bb417A1D"
     },
     "lendingContracts": {}
   },
@@ -333,7 +334,8 @@
       "uniSwapV3Bsc": "0x1AF3f25F8AE268680Bb8351a8457bBfD63514e11",
       "uniswapUniversalRouter": "0x99b4Dcc3a6fe2EEE7DccB932248916A533bE0989",
       "kyberSwapV3": "0xB9B207A77c84556eb6e02D2C0E7873BcF4E9c8d5",
-      "okx": "0xdDecC5735eC2b65C0b110d1DEdFCC90877ef8177"
+      "okx": "0xdDecC5735eC2b65C0b110d1DEdFCC90877ef8177",
+      "uniSwapV4": "0xfEE93FCD1a26e858325613818dE5C533d94A33b6"
     },
     "lendingContracts": {}
   },

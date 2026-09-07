@@ -166,9 +166,14 @@ const config: HardhatUserConfig = {
 };
 
 if (MAINNET_FORK) {
+  const forkChainId = parseInt(MAINNET_ID || '') || undefined;
   config.networks!.hardhat = {
     accounts: accounts,
-    chainId: parseInt(MAINNET_ID || '') || undefined,
+    chainId: forkChainId,
+    hardfork: 'cancun',
+    // Tell EDR to use Cancun for any non-mainnet chain (e.g. Base chainId=8453)
+    // without this, EDR reverts with "No known hardfork for execution on historical block"
+    chains: forkChainId && forkChainId !== 1 ? {[forkChainId]: {hardforkHistory: {cancun: 0}}} : undefined,
     forking: {
       url: MAINNET_FORK,
       blockNumber: parseInt(MAINNET_FORK_BLOCK || '') || undefined,
@@ -332,15 +337,7 @@ if (PRIVATE_KEY) {
     chainId: 8453,
     accounts: [PRIVATE_KEY],
     timeout: 60000,
-    gasPrice: 0.008 * 1e9,
-  };
-
-  config.networks!.polygon_mainnet = {
-    url: `https://poly.api.pocket.network`,
-    chainId: 137,
-    accounts: [PRIVATE_KEY],
-    timeout: 20000,
-    gasPrice: 280 * 1e9,
+    gasPrice: 0.007 * 1e9,
   };
 
   config.networks!.sonic_testnet = {
