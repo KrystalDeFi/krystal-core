@@ -45,6 +45,13 @@ const gasLimit = 3000000;
 // contract (same bytecode + constructor args + deployId) always lands on the same address.
 const CREATE2_FACTORY_ADDRESS = '0x4e59b44847b379578588920cA78FbF26c0B4956C';
 
+// The exact runtime code deployed at CREATE2_FACTORY_ADDRESS on every chain that has the real
+// proxy (verified against mainnet via eth_getCode). On a custom chain/fork, some other contract
+// could occupy this address - we must check for this exact bytecode, not just "code present",
+// before trusting it with deployment calldata and computing addresses as if it were the factory.
+const CREATE2_FACTORY_RUNTIME_CODE =
+  '0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3';
+
 const networkConfig = NetworkConfig[network.name];
 if (!networkConfig) {
   throw new Error(`Missing deploy config for ${network.name}`);
@@ -578,6 +585,14 @@ async function deployContract(
       await printInfo(tx.deployTransaction);
       isNewDeployment = true;
       log(2, `> address:\t${contract.address}`);
+    } else if (factoryCode.toLowerCase() !== CREATE2_FACTORY_RUNTIME_CODE.toLowerCase()) {
+      // Some contract other than the canonical proxy occupies this address (e.g. a custom
+      // chain/fork with different genesis/precompiles). Refuse to send it deployment calldata
+      // or trust CREATE2 addresses computed against it.
+      throw new Error(
+        `Unexpected bytecode at CREATE2_FACTORY_ADDRESS (${CREATE2_FACTORY_ADDRESS}) on ${network.name}; ` +
+          `refusing to treat it as the canonical deterministic deployment proxy`
+      );
     } else {
       const deterministicAddress = getDeterministicAddress(factory, args, salt);
       const existingCode = await ethers.provider.getCode(deterministicAddress);
