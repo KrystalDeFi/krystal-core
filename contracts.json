@@ -36,6 +36,7 @@
     "smartWalletImplementation": "0x97CBD5d05Cd423391487dB741Ef089D7F2450942",
     "smartWalletProxy": "0x38b8b1BdF0dBB2E53c83A4cd6397837eF05F4364",
     "swapContracts": {
+      "uniSwap": "0x1179f7Dc9CEb7E0c1189df59074b5334d7cda7df",
       "uniSwapV3Bsc": "0xEEa3aecC40AF2F23FFb6b6bB8013aa17693E9a4f",
       "okx": "0x82746142dA1929e40b4a2B180C66506016be1B15",
       "uniswapUniversalRouter": "0x79bD86eB66aA3DDb51943eB7982234fE265811d6",

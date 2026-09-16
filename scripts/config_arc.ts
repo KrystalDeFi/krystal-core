@@ -34,6 +34,14 @@ export const ArcConfig: Record<string, IConfig> = {
       okxTokenApprove: '0x2B9899bC46Bf0eE094225995f4bD496d42f261Af',
     },
 
+    uniswap: {
+      routers: {
+        univ2: {
+          address: '0x1f7d7550B1b028f7571E69A784071F0205FD2EfA',
+        },
+      },
+    },
+
     uniswapV4: {
       routers: [
         {
