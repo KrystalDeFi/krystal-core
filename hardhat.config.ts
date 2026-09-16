@@ -395,6 +395,14 @@ if (PRIVATE_KEY) {
     timeout: 20000,
     gasPrice: 0.5 * 1e9,
   };
+
+  config.networks!.arc_mainnet = {
+    url: 'https://rpc-node-lb.krystal.app/?chain_id=5042',
+    chainId: 5042,
+    accounts: [PRIVATE_KEY],
+    timeout: 20000,
+    gasPrice: 20 * 1e9,
+  };
 }
 
 if (PRIVATE_KEY && INFURA_API_KEY) {
