@@ -32,6 +32,18 @@
     },
     "lendingContracts": {}
   },
+  "arc_mainnet": {
+    "smartWalletImplementation": "0x97CBD5d05Cd423391487dB741Ef089D7F2450942",
+    "smartWalletProxy": "0x38b8b1BdF0dBB2E53c83A4cd6397837eF05F4364",
+    "swapContracts": {
+      "uniSwapV3Bsc": "0xEEa3aecC40AF2F23FFb6b6bB8013aa17693E9a4f",
+      "okx": "0x82746142dA1929e40b4a2B180C66506016be1B15",
+      "uniswapUniversalRouter": "0x79bD86eB66aA3DDb51943eB7982234fE265811d6",
+      "kyberSwapV3": "0x70bCD72A45B8fD6099C5B472C975896f2d011eCf",
+      "uniSwapV4": "0x9f578DF2dB647C42D43d4691fae0A9f062cACAF4"
+    },
+    "lendingContracts": {}
+  },
   "aurora_mainnet": {
     "smartWalletImplementation": "0x533f9E9CfBea647a445a337955496668029621Fb",
     "smartWalletProxy": "0x864F01c5E46b0712643B956BcA607bF883e0dbC5",
