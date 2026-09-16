@@ -78,13 +78,30 @@ contract UniSwapV3Bsc is BaseSwap {
     using TickBitmap for IUniswapV3Pool;
 
     EnumerableSet.AddressSet private uniRouters;
+    // Real, liquid address for the native token, used instead of a router's own (possibly
+    // unrelated/illiquid) WETH9() when nativeIsErc20 is true - see UniSwap.sol for the rationale.
+    address public wNative;
+    bool public nativeIsErc20;
 
     event UpdatedUniRouters(ISwapRouterBscInternal[] routers, bool isSupported);
+    event UpdatedNativeIsErc20(bool nativeIsErc20);
 
-    constructor(address _admin, ISwapRouterBscInternal[] memory routers) BaseSwap(_admin) {
+    constructor(
+        address _admin,
+        ISwapRouterBscInternal[] memory routers,
+        address _wNative,
+        bool _nativeIsErc20
+    ) BaseSwap(_admin) {
         for (uint256 i = 0; i < routers.length; i++) {
             uniRouters.add(address(routers[i]));
         }
+        wNative = _wNative;
+        nativeIsErc20 = _nativeIsErc20;
+    }
+
+    function updateNativeIsErc20(bool _nativeIsErc20) external onlyAdmin {
+        nativeIsErc20 = _nativeIsErc20;
+        emit UpdatedNativeIsErc20(_nativeIsErc20);
     }
 
     struct StepComputations {
@@ -275,7 +292,13 @@ contract UniSwapV3Bsc is BaseSwap {
             params.extraArgs
         );
 
-        safeApproveAllowance(address(router), IERC20Ext(params.tradePath[0]));
+        if (nativeIsErc20 && params.tradePath[0] == address(ETH_TOKEN_ADDRESS)) {
+            // the sentinel is tradeable here as the plain ERC20 `wNative` and needs a real
+            // allowance, unlike a genuine native asset
+            safeApproveAllowance(address(router), IERC20Ext(wNative));
+        } else {
+            safeApproveAllowance(address(router), IERC20Ext(params.tradePath[0]));
+        }
 
         destAmount = getBalance(
             IERC20Ext(params.tradePath[params.tradePath.length - 1]),
@@ -317,22 +340,25 @@ contract UniSwapV3Bsc is BaseSwap {
         uint24[] memory fees,
         address recipient
     ) internal {
-        bytes memory path = abi.encodePacked(safeWrapToken(tradePath[0], router.WETH9()));
+        address wrapAddr = wrapTarget(router);
+        bool srcIsNative = tradePath[0] == address(ETH_TOKEN_ADDRESS);
+        bool destIsNative = tradePath[tradePath.length - 1] == address(ETH_TOKEN_ADDRESS);
+
+        bytes memory path = abi.encodePacked(safeWrapToken(tradePath[0], wrapAddr));
         for (uint256 i = 0; i < fees.length; i++) {
-            path = abi.encodePacked(
-                path,
-                fees[i],
-                safeWrapToken(tradePath[i + 1], router.WETH9())
-            );
+            path = abi.encodePacked(path, fees[i], safeWrapToken(tradePath[i + 1], wrapAddr));
         }
         ISwapRouterBsc.ExactInputParams memory swapData = ISwapRouterBsc.ExactInputParams({
             path: path,
             recipient: recipient,
-            amountIn: srcAmount,
-            amountOutMinimum: minDestAmount
+            amountIn: rescaleIfNative(srcAmount, srcIsNative),
+            amountOutMinimum: rescaleIfNative(minDestAmount, destIsNative)
         });
 
-        if (tradePath[tradePath.length - 1] == address(ETH_TOKEN_ADDRESS)) {
+        // nativeIsErc20 has no router-side wrap contract to unwrap from: its output already
+        // lands as a plain ERC20 credit to `recipient`, which is simultaneously their native
+        // balance (see UniSwap.sol), so it skips this multicall+unwrapWETH9 dance entirely
+        if (destIsNative && !nativeIsErc20) {
             swapData.recipient = address(2); // constant Constants.ADDRESS_THIS in UniswapV3 's SwapRouter02
             bytes[] memory multicallData = new bytes[](2);
             multicallData[0] = abi.encodeWithSelector(
@@ -346,9 +372,7 @@ contract UniSwapV3Bsc is BaseSwap {
             );
             router.multicall(multicallData);
         } else {
-            router.exactInput{value: tradePath[0] == address(ETH_TOKEN_ADDRESS) ? srcAmount : 0}(
-                swapData
-            );
+            router.exactInput{value: srcIsNative && !nativeIsErc20 ? srcAmount : 0}(swapData);
         }
     }
 
@@ -360,18 +384,22 @@ contract UniSwapV3Bsc is BaseSwap {
         uint24[] memory fees,
         address recipient
     ) internal {
+        address wrapAddr = wrapTarget(router);
+        bool srcIsNative = tradePath[0] == address(ETH_TOKEN_ADDRESS);
+        bool destIsNative = tradePath[tradePath.length - 1] == address(ETH_TOKEN_ADDRESS);
+
         ISwapRouterBsc.ExactInputSingleParams memory swapData = ISwapRouterBsc
         .ExactInputSingleParams({
-            tokenIn: safeWrapToken(tradePath[0], router.WETH9()),
-            tokenOut: safeWrapToken(tradePath[1], router.WETH9()),
+            tokenIn: safeWrapToken(tradePath[0], wrapAddr),
+            tokenOut: safeWrapToken(tradePath[1], wrapAddr),
             fee: fees[0],
             recipient: recipient,
-            amountIn: srcAmount,
-            amountOutMinimum: minDestAmount,
+            amountIn: rescaleIfNative(srcAmount, srcIsNative),
+            amountOutMinimum: rescaleIfNative(minDestAmount, destIsNative),
             sqrtPriceLimitX96: 0
         });
 
-        if (tradePath[tradePath.length - 1] == address(ETH_TOKEN_ADDRESS)) {
+        if (destIsNative && !nativeIsErc20) {
             swapData.recipient = address(2); // constant Constants.ADDRESS_THIS in UniswapV3 's SwapRouter02
             bytes[] memory multicallData = new bytes[](2);
             multicallData[0] = abi.encodeWithSelector(
@@ -385,9 +413,9 @@ contract UniSwapV3Bsc is BaseSwap {
             );
             router.multicall(multicallData);
         } else {
-            router.exactInputSingle{
-                value: tradePath[0] == address(ETH_TOKEN_ADDRESS) ? srcAmount : 0
-            }(swapData);
+            router.exactInputSingle{value: srcIsNative && !nativeIsErc20 ? srcAmount : 0}(
+                swapData
+            );
         }
     }
 
@@ -546,5 +574,16 @@ contract UniSwapV3Bsc is BaseSwap {
 
     function safeWrapToken(address token, address wrappedToken) internal pure returns (address) {
         return token == address(ETH_TOKEN_ADDRESS) ? wrappedToken : token;
+    }
+
+    // On nativeIsErc20 chains, trade the sentinel as the real, liquid `wNative` ERC20 instead of
+    // the router's own (possibly unrelated/illiquid) WETH9() - see UniSwap.sol for the rationale.
+    function wrapTarget(ISwapRouterBscInternal router) internal view returns (address) {
+        return nativeIsErc20 ? wNative : router.WETH9();
+    }
+
+    function rescaleIfNative(uint256 amount, bool isNative) internal returns (uint256) {
+        if (!nativeIsErc20 || !isNative) return amount;
+        return rescaleNativeAmount(amount, getSetDecimals(IERC20Ext(wNative)));
     }
 }

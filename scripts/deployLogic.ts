@@ -119,6 +119,7 @@ export const deploy = async (
   log(0, '======================\n');
   await updateUniSwapV3(deployedContracts.swapContracts?.uniSwapV3, extraArgs);
   await updateUniSwapV3(deployedContracts.swapContracts?.uniSwapV3Bsc, extraArgs);
+  await updateUniSwapV3BscNativeIsErc20(deployedContracts.swapContracts?.uniSwapV3Bsc, extraArgs);
 
   log(0, 'Updating kyberProxy config');
   log(0, '======================\n');
@@ -251,7 +252,8 @@ async function deployContracts(
             undefined,
             contractAdmin,
             Object.values(networkConfig.uniswap.routers).map((c) => c.address),
-            networkConfig.wNative
+            networkConfig.wNative,
+            networkConfig.nativeIsErc20 ?? false
           )) as UniSwap),
       uniSwapV3: !networkConfig.uniswapV3
         ? undefined
@@ -275,7 +277,9 @@ async function deployContracts(
             existingContract?.['swapContracts']?.['uniSwapV3Bsc'],
             undefined,
             contractAdmin,
-            networkConfig.uniSwapV3Bsc.routers
+            networkConfig.uniSwapV3Bsc.routers,
+            networkConfig.wNative,
+            networkConfig.nativeIsErc20 ?? false
           )) as UniSwapV3Bsc),
       projectXV3: !networkConfig.projectXV3
         ? undefined
@@ -803,6 +807,13 @@ async function updateUniSwap(uniSwap: UniSwap | undefined, extraArgs: {from?: st
   let toBeAdded = configRouters.filter((add) => !existing.includes(add));
   await updateAddressSet(uniSwap.populateTransaction.updateUniRouters, toBeRemoved, toBeAdded, extraArgs);
 
+  let wantNativeIsErc20 = networkConfig.nativeIsErc20 ?? false;
+  if ((await uniSwap.nativeIsErc20()) !== wantNativeIsErc20) {
+    log(1, 'update nativeIsErc20', wantNativeIsErc20);
+    const tx = await executeTxnOnBehalfOf(await uniSwap.populateTransaction.updateNativeIsErc20(wantNativeIsErc20));
+    await printInfo(tx);
+  }
+
   log(1, 'update custom selectors');
   for (const [router, {swapFromEth, swapToEth}] of Object.entries(networkConfig.uniswap.customSelectors ?? {})) {
     let swapFromEthSelector = ethers.utils.solidityKeccak256(['string'], [swapFromEth]).slice(0, 10);
@@ -832,6 +843,20 @@ async function updateUniSwapV3(uniSwapV3: UniSwapV3 | undefined, extraArgs: {fro
   let toBeRemoved = existing.filter((add) => !configRouters.includes(add));
   let toBeAdded = configRouters.filter((add) => !existing.includes(add));
   await updateAddressSet(uniSwapV3.populateTransaction.updateUniRouters, toBeRemoved, toBeAdded, extraArgs);
+}
+
+async function updateUniSwapV3BscNativeIsErc20(uniSwapV3Bsc: UniSwapV3Bsc | undefined, extraArgs: {from?: string}) {
+  if (!uniSwapV3Bsc || !networkConfig.uniSwapV3Bsc) {
+    return;
+  }
+  let wantNativeIsErc20 = networkConfig.nativeIsErc20 ?? false;
+  if ((await uniSwapV3Bsc.nativeIsErc20()) !== wantNativeIsErc20) {
+    log(1, 'update nativeIsErc20', wantNativeIsErc20);
+    const tx = await executeTxnOnBehalfOf(
+      await uniSwapV3Bsc.populateTransaction.updateNativeIsErc20(wantNativeIsErc20)
+    );
+    await printInfo(tx);
+  }
 }
 
 async function updateKyberProxy(kyberProxy: KyberProxy | undefined, extraArgs: {from?: string}) {

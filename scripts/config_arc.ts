@@ -17,6 +17,10 @@ export const ArcConfig: Record<string, IConfig> = {
     },
     //remember to check if this compatible w/ weth that dex used
     wNative: '0x3600000000000000000000000000000000000000',
+    // USDC is Arc's native token, exposed at wNative via an ERC20-interface precompile - there's
+    // no separate wrap contract, so swap adapters should trade wNative directly as an ERC20
+    // instead of relying on a DEX router's own (unrelated/illiquid) WETH.
+    nativeIsErc20: true,
 
     uniSwapV3Bsc: {
       routers: [
@@ -38,6 +42,12 @@ export const ArcConfig: Record<string, IConfig> = {
       routers: {
         univ2: {
           address: '0x1f7d7550B1b028f7571E69A784071F0205FD2EfA',
+          // usdc *is* native here, so a native<->usdc pair is a self-swap (rejected by any AMM);
+          // cirBTC has no pool against native on this particular router (verified on-chain via
+          // the factory - only V3/V4 have real cirBTC liquidity, see uniswapV3Arc/uniswapV4Arc
+          // tests). Leaving this empty until a token with genuine native-paired liquidity here
+          // is added to `tokens` above.
+          testingTokens: [],
         },
       },
     },

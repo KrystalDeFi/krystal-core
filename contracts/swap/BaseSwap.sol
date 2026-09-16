@@ -38,4 +38,15 @@ abstract contract BaseSwap is ISwap, Withdrawable, Utils {
             token.safeApprove(spender, MAX_ALLOWANCE);
         }
     }
+
+    /// @dev amounts tagged with the native sentinel are always denoted in ETH_DECIMALS (18), but
+    /// on a nativeIsErc20 chain the real token backing it (e.g. Arc's native USDC) may use fewer
+    /// decimals - rescale before trading it as that ERC20
+    function rescaleNativeAmount(uint256 amount, uint256 realTokenDecimals)
+        internal
+        pure
+        returns (uint256)
+    {
+        return amount / (10**(ETH_DECIMALS - realTokenDecimals));
+    }
 }

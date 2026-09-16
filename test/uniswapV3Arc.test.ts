@@ -4,6 +4,7 @@ import {assert, expect} from 'chai';
 import {hexlify, arrayify} from 'ethers/lib/utils';
 import {SignerWithAddress} from '@nomiclabs/hardhat-ethers/dist/src/signer-with-address';
 import {IERC20Ext, UniSwapV3Bsc} from '../typechain';
+import {nativeTokenAddress} from './helper';
 
 // ── Arc mainnet addresses (available via hardhat fork) ───────────────────────
 // USDC is Arc's native token: 0x3600...3600 is a precompile that exposes the account's native
@@ -47,7 +48,12 @@ describe('UniSwapV3Bsc — unit tests (Arc mainnet fork)', async () => {
     [admin, user] = await ethers.getSigners();
 
     const factory = await ethers.getContractFactory('UniSwapV3Bsc');
-    uniSwapV3 = (await factory.deploy(admin.address, [V3_ROUTER])) as UniSwapV3Bsc;
+    uniSwapV3 = (await factory.deploy(
+      admin.address,
+      [V3_ROUTER],
+      USDC_ADDRESS,
+      true // nativeIsErc20
+    )) as UniSwapV3Bsc;
     await uniSwapV3.deployed();
     await uniSwapV3.updateProxyContract(admin.address);
 
@@ -166,6 +172,52 @@ describe('UniSwapV3Bsc — unit tests (Arc mainnet fork)', async () => {
 
       const diff = srcAmount.sub(usdcAmountIn).abs();
       assert(diff.mul(100).lte(usdcAmountIn), `getExpectedIn too far from original: ${srcAmount} vs ${usdcAmountIn}`);
+    });
+  });
+
+  // Real native-value call (tradePath[0] = the native sentinel, funded via msg.value, exactly
+  // how SmartWalletImplementation forwards a native-sentinel swap). This exercises the
+  // nativeIsErc20 fix end to end: USDC is quoted/approved/traded as the real ERC20 at
+  // USDC_ADDRESS instead of the router's own (illiquid) WETH9(), with the 18-decimal native
+  // amount rescaled down to USDC's 6 decimals before being used as the router's amountIn.
+  // Funding via a plain native send (not usdc.transfer()) works locally because it's a native
+  // EVM balance mutation, not a call into the precompile's transfer()/transferFrom() - unlike
+  // the fully-skipped suite below, only the *output* leg here needs a real ERC20 transfer
+  // (cirBTC, an ordinary token), so this can run to completion on the local EDR fork.
+  describe('swap (native value)', () => {
+    // The swap gets as far as the pool calling back into the router to pull in USDC (proving the
+    // path/decimals fix worked: no INVALID_PATH, no wrong-magnitude amount) and only then hits
+    // "STF" (Uniswap V3's TransferHelper.safeTransferFrom failure string) - the same local-only
+    // precompile transferFrom limitation documented above, one level deeper in the call stack.
+    // Assert on that specific reason so a regression back to INVALID_PATH (or a silent
+    // wrong-amount pass) would fail this test instead of being masked by a generic revert.
+    it('swaps native value (18 decimals) -> cirBTC, rescaled to USDC (6 decimals), up to the known local transfer limitation', async () => {
+      const tradePath = [nativeTokenAddress, cirBTC_ADDRESS];
+      const extraArgs = buildExtraArgs(V3_ROUTER, 1);
+      const nativeAmountIn = ethers.utils.parseEther('50'); // $50 worth of native (18 decimals)
+
+      const destAmount = await uniSwapV3.getExpectedReturn({
+        srcAmount: usdcAmountIn, // same $50, denominated in USDC's real 6 decimals for the quote
+        tradePath: [USDC_ADDRESS, cirBTC_ADDRESS],
+        feeBps: 0,
+        extraArgs,
+      });
+      const minDestAmount = destAmount.mul(90).div(100);
+
+      await expect(
+        uniSwapV3.swap(
+          {
+            srcAmount: nativeAmountIn,
+            minDestAmount,
+            tradePath,
+            recipient: user.address,
+            feeBps: 0,
+            feeReceiver: admin.address,
+            extraArgs,
+          },
+          {value: nativeAmountIn}
+        )
+      ).to.be.revertedWith('STF');
     });
   });
 

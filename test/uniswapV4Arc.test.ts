@@ -84,7 +84,7 @@ describe('UniSwapV4 — unit tests (Arc mainnet fork)', async () => {
   // ── getExpectedReturn ──────────────────────────────────────────────────────
 
   describe('getExpectedReturn', () => {
-    it('native -> USDC returns non-zero destAmount', async () => {
+    it('native -> USDC returns non-zero destAmount, correctly ordered for native (18 decimals) vs USDC (6 decimals)', async () => {
       const tradePath = [nativeTokenAddress, USDC_ADDRESS];
       const extraArgs = buildExtraArgs(tradePath, NATIVE_USDC_FEE, NATIVE_USDC_TICK_SPACING);
 
@@ -96,6 +96,16 @@ describe('UniSwapV4 — unit tests (Arc mainnet fork)', async () => {
       });
 
       assert(destAmount.gt(0), 'destAmount should be > 0');
+      // native and USDC are pegged ~1:1 here (nativeUsdRate=1), and V4 nets each currency's own
+      // native decimals internally (no manual rescaling like UniSwap.sol/UniSwapV3Bsc.sol need) -
+      // so 10.0 native (18 decimals) should quote close to 10_000_000 raw USDC (6 decimals), not
+      // ~1e12x off in either direction were that internal accounting ever wrong
+      const pegged1to1AtUsdcDecimals = ethAmountIn.div(BigNumber.from(10).pow(12));
+      assert(
+        destAmount.gte(pegged1to1AtUsdcDecimals.mul(90).div(100)) &&
+          destAmount.lte(pegged1to1AtUsdcDecimals.mul(105).div(100)),
+        `destAmount ${destAmount} should be within a small band of the 1:1 peg ${pegged1to1AtUsdcDecimals} (raw USDC units), not off by a power of 10`
+      );
       console.log(`  native -> USDC: ${ethers.utils.formatEther(ethAmountIn)} -> ${destAmount} USDC (raw)`);
     });
 

@@ -21,20 +21,34 @@ contract UniSwap is BaseSwap {
 
     EnumerableSet.AddressSet private uniRouters;
     address public wEth;
+    // Some chains' native token is itself a plain, already-liquid ERC20 (e.g. Arc, where USDC is
+    // both the gas token and an ERC20 at a fixed address) and has no separate wrap contract - the
+    // router's own WETH() there is typically an unrelated/illiquid placeholder. When true, native
+    // swaps are routed through the regular ERC20 functions using `wEth` directly instead of the
+    // router's payable ETH functions.
+    bool public nativeIsErc20;
     mapping(address => bytes4) public customSwapFromEth;
     mapping(address => bytes4) public customSwapToEth;
 
     event UpdatedUniRouters(IUniswapV2Router02[] routers, bool isSupported);
+    event UpdatedNativeIsErc20(bool nativeIsErc20);
 
     constructor(
         address _admin,
         IUniswapV2Router02[] memory routers,
-        address _weth
+        address _weth,
+        bool _nativeIsErc20
     ) BaseSwap(_admin) {
         for (uint256 i = 0; i < routers.length; i++) {
             uniRouters.add(address(routers[i]));
         }
         wEth = _weth;
+        nativeIsErc20 = _nativeIsErc20;
+    }
+
+    function updateNativeIsErc20(bool _nativeIsErc20) external onlyAdmin {
+        nativeIsErc20 = _nativeIsErc20;
+        emit UpdatedNativeIsErc20(_nativeIsErc20);
     }
 
     function getAllUniRouters() external view returns (address[] memory addresses) {
@@ -180,24 +194,32 @@ contract UniSwap is BaseSwap {
 
         address router = parseExtraArgs(params.extraArgs);
 
-        safeApproveAllowance(router, IERC20Ext(params.tradePath[0]));
-
-        uint256 tradeLen = params.tradePath.length;
         IERC20Ext actualSrc = IERC20Ext(params.tradePath[0]);
-        IERC20Ext actualDest = IERC20Ext(params.tradePath[tradeLen - 1]);
+        IERC20Ext actualDest = IERC20Ext(params.tradePath[params.tradePath.length - 1]);
 
         // convert eth/bnb -> weth/wbnb address to trade on Uni
         address[] memory convertedTradePath = params.tradePath;
         if (convertedTradePath[0] == address(ETH_TOKEN_ADDRESS)) {
             convertedTradePath[0] = wEth;
         }
-        if (convertedTradePath[tradeLen - 1] == address(ETH_TOKEN_ADDRESS)) {
-            convertedTradePath[tradeLen - 1] = wEth;
+        if (convertedTradePath[convertedTradePath.length - 1] == address(ETH_TOKEN_ADDRESS)) {
+            convertedTradePath[convertedTradePath.length - 1] = wEth;
+        }
+
+        if (nativeIsErc20 && actualSrc == ETH_TOKEN_ADDRESS) {
+            // actualSrc is the native sentinel, but on this chain it's tradeable as a plain ERC20
+            // (convertedTradePath[0]) and needs a real allowance, unlike a genuine native asset
+            safeApproveAllowance(router, IERC20Ext(convertedTradePath[0]));
+        } else {
+            safeApproveAllowance(router, actualSrc);
         }
 
         uint256 destBalanceBefore = getBalance(actualDest, params.recipient);
 
-        if (actualSrc == ETH_TOKEN_ADDRESS) {
+        // on chains where the native token is itself a plain ERC20 (nativeIsErc20), there's no
+        // wrap step to skip: trade `wEth` like any other token instead of using the router's
+        // payable ETH functions, which rely on a (possibly unrelated/illiquid) router.WETH()
+        if (actualSrc == ETH_TOKEN_ADDRESS && !nativeIsErc20) {
             // swap eth/bnb -> token
             if (customSwapFromEth[address(router)] != "") {
                 (bool success, ) = router.call{value: params.srcAmount}(
@@ -216,7 +238,7 @@ contract UniSwap is BaseSwap {
                 }(params.minDestAmount, convertedTradePath, params.recipient, MAX_AMOUNT);
             }
         } else {
-            if (actualDest == ETH_TOKEN_ADDRESS) {
+            if (actualDest == ETH_TOKEN_ADDRESS && !nativeIsErc20) {
                 // swap token -> eth/bnb
                 if (customSwapToEth[address(router)] != "") {
                     (bool success, ) = router.call(
@@ -240,10 +262,11 @@ contract UniSwap is BaseSwap {
                     );
                 }
             } else {
-                // swap token -> token
+                // swap token -> token (also covers native src/dest when nativeIsErc20, using
+                // wEth-rescaled amounts - see rescaleIfNative)
                 IUniswapV2Router02(router).swapExactTokensForTokensSupportingFeeOnTransferTokens(
-                    params.srcAmount,
-                    params.minDestAmount,
+                    rescaleIfNative(params.srcAmount, actualSrc == ETH_TOKEN_ADDRESS),
+                    rescaleIfNative(params.minDestAmount, actualDest == ETH_TOKEN_ADDRESS),
                     convertedTradePath,
                     params.recipient,
                     MAX_AMOUNT
@@ -260,5 +283,10 @@ contract UniSwap is BaseSwap {
         router = extraArgs.toAddress(0);
         require(router != address(0), "invalid address");
         require(uniRouters.contains(router), "unsupported router");
+    }
+
+    function rescaleIfNative(uint256 amount, bool isNative) internal returns (uint256) {
+        if (!nativeIsErc20 || !isNative) return amount;
+        return rescaleNativeAmount(amount, getSetDecimals(IERC20Ext(wEth)));
     }
 }

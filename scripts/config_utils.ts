@@ -22,6 +22,12 @@ export interface IConfig {
   //remember to check if this compatible w/ weth that dex used
   wNative: string;
 
+  // true when the chain's native token is itself a plain, already-liquid ERC20 at a fixed
+  // address (e.g. Arc, where USDC is both the gas token and an ERC20) rather than requiring a
+  // separate wrap contract. Swap adapters use this to trade `wNative` directly as an ERC20
+  // instead of relying on a DEX router's own (possibly unrelated/illiquid) wrapped-native token.
+  nativeIsErc20?: boolean;
+
   // Uniswap or clones
   uniswap?: {
     routers: Record<
