@@ -27,7 +27,7 @@ import {
   UniSwapV4,
   UniswapUniversalRouter,
 } from '../typechain';
-import {Contract} from '@ethersproject/contracts';
+import {Contract, ContractFactory} from '@ethersproject/contracts';
 import {IAaveV2Config} from './config_utils';
 import {equalHex, sleep, zeroAddress} from '../test/helper';
 import {PopulatedTransaction} from 'ethers';
@@ -39,6 +39,11 @@ import Safe from '@gnosis.pm/safe-core-sdk';
 import {ok} from 'assert';
 
 const gasLimit = 3000000;
+
+// Canonical CREATE2 deployment proxy ("Nick's factory"), pre-deployed at the same address on
+// essentially every EVM chain. Sending it `salt ++ initCode` deploys via CREATE2, so the same
+// contract (same bytecode + constructor args + deployId) always lands on the same address.
+const CREATE2_FACTORY_ADDRESS = '0x4e59b44847b379578588920cA78FbF26c0B4956C';
 
 const networkConfig = NetworkConfig[network.name];
 if (!networkConfig) {
@@ -200,6 +205,7 @@ async function deployContracts(
       ++step,
       networkConfig.autoVerifyContract,
       'SmartWalletImplementation',
+      'smartWalletImplementation',
       existingContract?.['smartWalletImplementation'],
       undefined,
       contractAdmin
@@ -219,6 +225,7 @@ async function deployContracts(
         ++step,
         networkConfig.autoVerifyContract,
         'FetchAaveDataWrapper',
+        'fetchAaveDataWrapper',
         existingContract?.['fetchAaveDataWrapper'],
         undefined,
         contractAdmin
@@ -232,6 +239,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'UniSwap',
+            'swapContracts.uniSwap',
             existingContract?.['swapContracts']?.['uniSwap'],
             undefined,
             contractAdmin,
@@ -244,6 +252,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'UniSwapV3',
+            'swapContracts.uniSwapV3',
             existingContract?.['swapContracts']?.['uniSwapV3'],
             undefined,
             contractAdmin,
@@ -255,6 +264,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'UniSwapV3Bsc',
+            'swapContracts.uniSwapV3Bsc',
             existingContract?.['swapContracts']?.['uniSwapV3Bsc'],
             undefined,
             contractAdmin,
@@ -266,6 +276,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'ProjectXV3',
+            'swapContracts.projectXV3',
             existingContract?.['swapContracts']?.['projectXV3'],
             undefined,
             contractAdmin,
@@ -277,6 +288,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'KyberProxy',
+            'swapContracts.kyberProxy',
             existingContract?.['swapContracts']?.['kyberProxy'],
             undefined,
             contractAdmin,
@@ -288,6 +300,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'KyberDmm',
+            'swapContracts.kyberDmm',
             existingContract?.['swapContracts']?.['kyberDmm'],
             undefined,
             contractAdmin,
@@ -299,6 +312,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'OneInch',
+            'swapContracts.oneInch',
             existingContract?.['swapContracts']?.['oneInch'],
             undefined,
             contractAdmin,
@@ -311,6 +325,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'OpenOcean',
+            'swapContracts.openOcean',
             existingContract?.['swapContracts']?.['openOcean'],
             undefined,
             contractAdmin,
@@ -323,6 +338,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'Okx',
+            'swapContracts.okx',
             existingContract?.['swapContracts']?.['okx'],
             undefined,
             contractAdmin,
@@ -336,6 +352,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'UniswapUniversalRouter',
+            'swapContracts.uniswapUniversalRouter',
             existingContract?.['swapContracts']?.['uniswapUniversalRouter'],
             undefined,
             contractAdmin,
@@ -349,6 +366,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'KyberDmmV2',
+            'swapContracts.kyberDmmV2',
             existingContract?.['swapContracts']?.['kyberDmmV2'],
             undefined,
             contractAdmin,
@@ -360,6 +378,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'KyberSwapV2',
+            'swapContracts.kyberSwapV2',
             existingContract?.['swapContracts']?.['kyberSwapV2'],
             undefined,
             contractAdmin,
@@ -371,6 +390,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'KyberSwapV3',
+            'swapContracts.kyberSwapV3',
             existingContract?.['swapContracts']?.['kyberSwapV3'],
             undefined,
             contractAdmin,
@@ -382,6 +402,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'Velodrome',
+            'swapContracts.velodrome',
             existingContract?.['swapContracts']?.['velodrome'],
             undefined,
             contractAdmin,
@@ -396,6 +417,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'UniSwapV4',
+            'swapContracts.uniSwapV4',
             existingContract?.['swapContracts']?.['uniSwapV4'],
             undefined,
             contractAdmin,
@@ -412,6 +434,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'CompoundLending',
+            'lendingContracts.compoundLending',
             existingContract?.['lendingContracts']?.['compoundLending'],
             undefined,
             contractAdmin
@@ -423,6 +446,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'AaveV1Lending',
+            'lendingContracts.aaveV1',
             existingContract?.['lendingContracts']?.['aaveV1'],
             undefined,
             contractAdmin
@@ -434,6 +458,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'AaveV2Lending',
+            'lendingContracts.aaveV2',
             existingContract?.['lendingContracts']?.['aaveV2'],
             undefined,
             contractAdmin
@@ -445,6 +470,7 @@ async function deployContracts(
             ++step,
             networkConfig.autoVerifyContract,
             'AaveV2Lending',
+            'lendingContracts.aaveAMM',
             existingContract?.['lendingContracts']?.['aaveAMM'],
             undefined,
             contractAdmin
@@ -455,6 +481,7 @@ async function deployContracts(
       ++step,
       networkConfig.autoVerifyContract,
       'SmartWalletProxy',
+      'smartWalletProxy',
       existingContract?.['smartWalletProxy'],
       undefined,
       contractAdmin,
@@ -475,6 +502,7 @@ async function deployContracts(
       ++step,
       networkConfig.autoVerifyContract,
       'KrystalCollectiblesImpl',
+      'nftImplementation',
       existingContract?.['nftImplementation'],
       undefined
     )) as KrystalCollectiblesImpl;
@@ -491,6 +519,7 @@ async function deployContracts(
       ++step,
       networkConfig.autoVerifyContract,
       'KrystalCollectibles',
+      'nft',
       existingContract?.['nft'],
       'contracts/nft/KrystalCollectibles.sol:KrystalCollectibles',
       nftImplementation.address,
@@ -515,6 +544,7 @@ async function deployContract(
   step: number,
   autoVerify: boolean,
   contractName: string,
+  deployId: string,
   contractAddress: string | undefined,
   contractLocation: string | undefined,
   ...args: any[]
@@ -526,6 +556,7 @@ async function deployContract(
   const factory = await ethers.getContractFactory(contractName);
 
   let contract;
+  let isNewDeployment = false;
 
   if (contractAddress) {
     log(2, `> contract already exists`);
@@ -533,17 +564,39 @@ async function deployContract(
     // TODO: Transfer admin if needed
     contract = factory.attach(contractAddress);
   } else {
-    log(1, 'wait for factory deploy');
-    contract = await factory.deploy(...args);
-    log(1, 'wait for contract deploy');
-    const tx = await contract.deployed();
-    await printInfo(tx.deployTransaction);
-    log(2, `> address:\t${contract.address}`);
+    const salt = getDeploySalt(deployId);
+    const factoryCode = await ethers.provider.getCode(CREATE2_FACTORY_ADDRESS);
+
+    if (factoryCode === '0x') {
+      // Deterministic deployment proxy isn't available on this chain (e.g. local/hardhat
+      // network, or a custom chain that hasn't had it deployed) - fall back to a plain deploy.
+      log(2, `> deterministic deployment proxy not available on ${network.name}, deploying normally`);
+      log(1, 'wait for factory deploy');
+      contract = await factory.deploy(...args);
+      log(1, 'wait for contract deploy');
+      const tx = await contract.deployed();
+      await printInfo(tx.deployTransaction);
+      isNewDeployment = true;
+      log(2, `> address:\t${contract.address}`);
+    } else {
+      const deterministicAddress = getDeterministicAddress(factory, args, salt);
+      const existingCode = await ethers.provider.getCode(deterministicAddress);
+
+      if (existingCode !== '0x') {
+        log(2, `> contract already deployed deterministically on this chain, skipping deployment`);
+        log(2, `> address:\t${deterministicAddress}`);
+        contract = factory.attach(deterministicAddress);
+      } else {
+        log(1, 'wait for deterministic (CREATE2) deploy');
+        contract = await deployDeterministic(factory, args, salt, deterministicAddress);
+        isNewDeployment = true;
+        log(2, `> address:\t${contract.address}`);
+      }
+    }
   }
 
   // Only verify new contract to save time
-  if (autoVerify && !contractAddress) {
-    // if (autoVerify && contractAddress == '0xC6c43491BDD1ff455A507f2c1956d616bb417A1D') {
+  if (autoVerify && isNewDeployment) {
     try {
       log(3, '>> sleep first, wait for contract data to be propagated');
       await sleep(5000);
@@ -560,6 +613,39 @@ async function deployContract(
   }
 
   return contract;
+}
+
+// Distinct deployId per contract slot, so slots sharing contract code + constructor args
+// (e.g. aaveV2 vs aaveAMM, both `AaveV2Lending(contractAdmin)`) don't collide on one address.
+function getDeploySalt(deployId: string): string {
+  return ethers.utils.keccak256(ethers.utils.toUtf8Bytes(`krystal-core:${deployId}`));
+}
+
+function getDeterministicAddress(factory: ContractFactory, args: any[], salt: string): string {
+  const initCode = factory.getDeployTransaction(...args).data!.toString();
+  return ethers.utils.getCreate2Address(CREATE2_FACTORY_ADDRESS, salt, ethers.utils.keccak256(initCode));
+}
+
+async function deployDeterministic(
+  factory: ContractFactory,
+  args: any[],
+  salt: string,
+  expectedAddress: string
+): Promise<Contract> {
+  const initCode = factory.getDeployTransaction(...args).data!.toString();
+  const [deployer] = await ethers.getSigners();
+  const tx = await deployer.sendTransaction({
+    to: CREATE2_FACTORY_ADDRESS,
+    data: ethers.utils.hexConcat([salt, initCode]),
+  });
+  await printInfo(tx);
+
+  const deployedCode = await ethers.provider.getCode(expectedAddress);
+  if (deployedCode === '0x') {
+    throw new Error(`CREATE2 deployment did not produce code at expected address ${expectedAddress}`);
+  }
+
+  return factory.attach(expectedAddress);
 }
 
 async function updateProxy(
