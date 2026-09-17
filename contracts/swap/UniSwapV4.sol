@@ -168,15 +168,31 @@ contract UniSwapV4 is BaseSwap {
     EnumerableSet.AddressSet private uniRouters;
     mapping(address => RouterConfig) public routerConfigs;
 
+    // Real, liquid address for the native token, traded directly as an ERC20 (instead of V4's
+    // native currency slot, address(0)) when nativeIsErc20 is true - see BaseSwap.sol for the
+    // rationale (e.g. Arc, where USDC is both the gas token and this address).
+    address public wNative;
+    bool public nativeIsErc20;
+
     event UpdatedUniRouters(address[] routers, bool isSupported);
+    event UpdatedNativeIsErc20(bool nativeIsErc20);
 
     constructor(
         address _admin,
         address[] memory routers,
         address[] memory stateViews,
-        address[] memory nfpms
+        address[] memory nfpms,
+        address _wNative,
+        bool _nativeIsErc20
     ) BaseSwap(_admin) {
         _updateUniRouters(routers, stateViews, nfpms, true);
+        wNative = _wNative;
+        nativeIsErc20 = _nativeIsErc20;
+    }
+
+    function updateNativeIsErc20(bool _nativeIsErc20) external onlyAdmin {
+        nativeIsErc20 = _nativeIsErc20;
+        emit UpdatedNativeIsErc20(_nativeIsErc20);
     }
 
     struct StepComputations {
@@ -211,6 +227,14 @@ contract UniSwapV4 is BaseSwap {
         uint256 minDestAmount;
         bool inputIsETH;
         address recipient;
+    }
+
+    /// @dev Bundles swap()'s already-rescaled scalars to avoid stack-too-deep in
+    ///      _doSwapAndMeasure.
+    struct RescaledSwap {
+        uint256 srcAmount;
+        uint256 minDestAmount;
+        bool inputIsETH;
     }
 
     // ── Admin ────────────────────────────────────────────────────────────────
@@ -293,7 +317,7 @@ contract UniSwapV4 is BaseSwap {
             params.extraArgs
         );
 
-        destAmount = params.srcAmount;
+        destAmount = rescaleNativeDown(params.srcAmount, params.tradePath[0]);
         for (uint256 i = 0; i < hopCount; i++) {
             destAmount = getAmountOut(
                 stateView,
@@ -304,6 +328,7 @@ contract UniSwapV4 is BaseSwap {
                 poolIds[i]
             );
         }
+        destAmount = rescaleNativeUp(destAmount, params.tradePath[hopCount]);
     }
 
     function getExpectedReturnWithImpact(GetExpectedReturnParams calldata params)
@@ -320,8 +345,8 @@ contract UniSwapV4 is BaseSwap {
             params.extraArgs
         );
 
-        destAmount = params.srcAmount;
-        uint256 quote = params.srcAmount;
+        destAmount = rescaleNativeDown(params.srcAmount, params.tradePath[0]);
+        uint256 quote = destAmount;
         for (uint256 i = 0; i < hopCount; i++) {
             destAmount = getAmountOut(
                 stateView,
@@ -340,6 +365,7 @@ contract UniSwapV4 is BaseSwap {
             );
         }
         priceImpact = quote <= destAmount ? 0 : quote.sub(destAmount).mul(BPS) / quote;
+        destAmount = rescaleNativeUp(destAmount, params.tradePath[hopCount]);
     }
 
     function getExpectedIn(GetExpectedInParams calldata params)
@@ -356,7 +382,10 @@ contract UniSwapV4 is BaseSwap {
             params.extraArgs
         );
 
-        srcAmount = params.destAmount;
+        srcAmount = rescaleNativeDown(
+            params.destAmount,
+            params.tradePath[params.tradePath.length - 1]
+        );
         for (uint256 i = params.tradePath.length - 1; i > 0; i--) {
             srcAmount = getAmountIn(
                 stateView,
@@ -367,6 +396,7 @@ contract UniSwapV4 is BaseSwap {
                 poolIds[i - 1]
             );
         }
+        srcAmount = rescaleNativeUp(srcAmount, params.tradePath[0]);
     }
 
     function getExpectedInWithImpact(GetExpectedInParams calldata params)
@@ -383,7 +413,11 @@ contract UniSwapV4 is BaseSwap {
             params.extraArgs
         );
 
-        srcAmount = params.destAmount;
+        uint256 destAmountInternal = rescaleNativeDown(
+            params.destAmount,
+            params.tradePath[params.tradePath.length - 1]
+        );
+        srcAmount = destAmountInternal;
         for (uint256 i = params.tradePath.length - 1; i > 0; i--) {
             srcAmount = getAmountIn(
                 stateView,
@@ -404,9 +438,10 @@ contract UniSwapV4 is BaseSwap {
                 poolIds[i]
             );
         }
-        priceImpact = quote <= params.destAmount
+        priceImpact = quote <= destAmountInternal
             ? 0
-            : quote.sub(params.destAmount).mul(BPS) / quote;
+            : quote.sub(destAmountInternal).mul(BPS) / quote;
+        srcAmount = rescaleNativeUp(srcAmount, params.tradePath[0]);
     }
 
     // ── ISwap — swap ─────────────────────────────────────────────────────────
@@ -427,12 +462,32 @@ contract UniSwapV4 is BaseSwap {
         );
 
         bool inputIsETH = params.tradePath[0] == address(ETH_TOKEN_ADDRESS);
+        uint256 srcAmount = rescaleNativeDown(params.srcAmount, params.tradePath[0]);
+        uint256 minDestAmount = rescaleNativeDown(
+            params.minDestAmount,
+            params.tradePath[params.tradePath.length - 1]
+        );
 
-        if (!inputIsETH) {
-            IERC20Ext(params.tradePath[0]).safeTransfer(address(router), params.srcAmount);
+        if (inputIsETH && nativeIsErc20) {
+            // native and wNative are the same underlying balance here (see v4Currency) - push the
+            // rescaled credit to the router like a real ERC20 input, instead of forwarding
+            // msg.value for a currency that isn't actually V4's native slot.
+            IERC20Ext(wNative).safeTransfer(address(router), srcAmount);
+        } else if (!inputIsETH) {
+            IERC20Ext(params.tradePath[0]).safeTransfer(address(router), srcAmount);
         }
 
-        destAmount = _doSwapAndMeasure(router, nfpm, params, poolIds, inputIsETH);
+        destAmount = _doSwapAndMeasure(
+            router,
+            nfpm,
+            params,
+            poolIds,
+            RescaledSwap({
+                srcAmount: srcAmount,
+                minDestAmount: minDestAmount,
+                inputIsETH: inputIsETH && !nativeIsErc20
+            })
+        );
     }
 
     /// @dev Output is taken from the PoolManager straight to params.recipient (never held by this
@@ -444,7 +499,7 @@ contract UniSwapV4 is BaseSwap {
         INFPM nfpm,
         SwapParams calldata params,
         bytes32[] memory poolIds,
-        bool inputIsETH
+        RescaledSwap memory rescaled
     ) private returns (uint256 delta) {
         IERC20Ext outputToken = IERC20Ext(params.tradePath[params.tradePath.length - 1]);
         uint256 balanceBefore = getBalance(outputToken, params.recipient);
@@ -453,11 +508,11 @@ contract UniSwapV4 is BaseSwap {
             swapExactInputSingle(
                 router,
                 nfpm,
-                params.srcAmount,
-                params.minDestAmount,
+                rescaled.srcAmount,
+                rescaled.minDestAmount,
                 params.tradePath,
                 poolIds[0],
-                inputIsETH,
+                rescaled.inputIsETH,
                 params.recipient
             );
         } else {
@@ -467,9 +522,9 @@ contract UniSwapV4 is BaseSwap {
                 params.tradePath,
                 poolIds,
                 ExactInputArgs({
-                    srcAmount: params.srcAmount,
-                    minDestAmount: params.minDestAmount,
-                    inputIsETH: inputIsETH,
+                    srcAmount: rescaled.srcAmount,
+                    minDestAmount: rescaled.minDestAmount,
+                    inputIsETH: rescaled.inputIsETH,
                     recipient: params.recipient
                 })
             );
@@ -856,9 +911,33 @@ contract UniSwapV4 is BaseSwap {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /// @dev V4 uses address(0) for native ETH; we map ETH_TOKEN_ADDRESS accordingly.
+    /// @dev V4 uses address(0) for native ETH; we map ETH_TOKEN_ADDRESS accordingly - unless
+    ///      nativeIsErc20, where the native sentinel is really just `wNative` (a plain, already-
+    ///      liquid ERC20), so it trades through wNative's own pools directly instead of a
+    ///      separate native/wNative pool.
     function v4Currency(address token) internal view returns (address) {
-        return token == address(ETH_TOKEN_ADDRESS) ? address(0) : token;
+        if (token != address(ETH_TOKEN_ADDRESS)) return token;
+        return nativeIsErc20 ? wNative : address(0);
+    }
+
+    /// @dev true when `token` is the native sentinel and this chain's native currency doubles as
+    ///      the plain ERC20 `wNative` - i.e. this leg needs the ETH_DECIMALS rescale below.
+    function isNativeErc20Leg(address token) internal view returns (bool) {
+        return nativeIsErc20 && token == address(ETH_TOKEN_ADDRESS);
+    }
+
+    /// @dev native sentinel amounts are always denoted in ETH_DECIMALS (18); rescale down to
+    ///      wNative's real decimals before using it as a pool amount.
+    function rescaleNativeDown(uint256 amount, address token) internal view returns (uint256) {
+        if (!isNativeErc20Leg(token)) return amount;
+        return rescaleNativeAmount(amount, getDecimals(IERC20Ext(wNative)));
+    }
+
+    /// @dev inverse of rescaleNativeDown - translates a wNative-denominated amount back to the
+    ///      native sentinel's ETH_DECIMALS convention.
+    function rescaleNativeUp(uint256 amount, address token) internal view returns (uint256) {
+        if (!isNativeErc20Leg(token)) return amount;
+        return amount * (10**(ETH_DECIMALS - getDecimals(IERC20Ext(wNative))));
     }
 
     /// @dev Reverts on overflow instead of silently truncating, unlike a bare uint128(x) cast.

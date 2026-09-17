@@ -71,7 +71,14 @@ describe('UniSwapV4 — unit tests (Base mainnet fork)', async () => {
 
     // Deploy UniSwapV4 with admin as the proxy contract (bypasses onlyProxyContract)
     const factory = await ethers.getContractFactory('UniSwapV4');
-    uniSwapV4 = (await factory.deploy(admin.address, [UNIVERSAL_ROUTER], [STATE_VIEW], [NFPM])) as UniSwapV4;
+    uniSwapV4 = (await factory.deploy(
+      admin.address,
+      [UNIVERSAL_ROUTER],
+      [STATE_VIEW],
+      [NFPM],
+      ethers.constants.AddressZero,
+      false
+    )) as UniSwapV4;
     await uniSwapV4.deployed();
 
     // Register admin as the proxy so we can call swap/quote functions directly

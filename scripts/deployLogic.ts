@@ -405,7 +405,9 @@ async function deployContracts(
             existingContract?.['swapContracts']?.['kyberSwapV3'],
             undefined,
             contractAdmin,
-            networkConfig.kyberSwapV3.router
+            networkConfig.kyberSwapV3.router,
+            networkConfig.wNative,
+            networkConfig.nativeIsErc20 ?? false
           )) as KyberSwapV3),
       velodrome: !networkConfig.velodrome
         ? undefined
@@ -434,7 +436,9 @@ async function deployContracts(
             contractAdmin,
             networkConfig.uniswapV4.routers.map((r) => r.router),
             networkConfig.uniswapV4.routers.map((r) => r.stateView),
-            networkConfig.uniswapV4.routers.map((r) => r.nfpm)
+            networkConfig.uniswapV4.routers.map((r) => r.nfpm),
+            networkConfig.wNative,
+            networkConfig.nativeIsErc20 ?? false
           )) as UniSwapV4),
     };
 
@@ -986,6 +990,20 @@ async function updateUniswapUniversalRouter(
     log(2, '> updated universalRouter', networkConfig.uniswapUniversalRouter.universalRouter);
     await printInfo(tx);
   }
+
+  let wantNativeIsErc20 = networkConfig.nativeIsErc20 ?? false;
+  if (
+    (await uniswapUniversalRouter.wNative()).toLowerCase() === networkConfig.wNative.toLowerCase() &&
+    (await uniswapUniversalRouter.nativeIsErc20()) === wantNativeIsErc20
+  ) {
+    log(2, `nativeIsErc20 already up-to-date (wNative=${networkConfig.wNative}, ${wantNativeIsErc20})`);
+  } else {
+    const tx = await executeTxnOnBehalfOf(
+      await uniswapUniversalRouter.populateTransaction.updateNativeIsErc20(networkConfig.wNative, wantNativeIsErc20)
+    );
+    log(2, '> updated nativeIsErc20', networkConfig.wNative, wantNativeIsErc20);
+    await printInfo(tx);
+  }
 }
 
 async function updateKyberDmmV2(kyberDmmV2: KyberDmmV2 | undefined, extraArgs: {from?: string}) {
@@ -1038,6 +1056,15 @@ async function updateKyberSwapV3(kyberSwapV3: KyberSwapV3 | undefined, extraArgs
       await kyberSwapV3.populateTransaction.updateAggregationRouter(networkConfig.kyberSwapV3.router)
     );
     log(2, '> updated kyberSwapV3', JSON.stringify(networkConfig.kyberSwapV3, null, 2));
+    await printInfo(tx);
+  }
+
+  let wantNativeIsErc20 = networkConfig.nativeIsErc20 ?? false;
+  if ((await kyberSwapV3.nativeIsErc20()) !== wantNativeIsErc20) {
+    log(2, 'update nativeIsErc20', wantNativeIsErc20);
+    const tx = await executeTxnOnBehalfOf(
+      await kyberSwapV3.populateTransaction.updateNativeIsErc20(wantNativeIsErc20)
+    );
     await printInfo(tx);
   }
 }
@@ -1138,6 +1165,13 @@ async function updateUniSwapV4(uniSwapV4: UniSwapV4 | undefined, extraArgs: {fro
     await printInfo(tx);
   } else {
     log(2, '> nothing to be added/updated');
+  }
+
+  let wantNativeIsErc20 = networkConfig.nativeIsErc20 ?? false;
+  if ((await uniSwapV4.nativeIsErc20()) !== wantNativeIsErc20) {
+    log(1, 'update nativeIsErc20', wantNativeIsErc20);
+    const tx = await executeTxnOnBehalfOf(await uniSwapV4.populateTransaction.updateNativeIsErc20(wantNativeIsErc20));
+    await printInfo(tx);
   }
 }
 

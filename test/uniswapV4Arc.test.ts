@@ -66,7 +66,19 @@ describe('UniSwapV4 — unit tests (Arc mainnet fork)', async () => {
     [admin, user] = await ethers.getSigners();
 
     const factory = await ethers.getContractFactory('UniSwapV4');
-    uniSwapV4 = (await factory.deploy(admin.address, [UNIVERSAL_ROUTER], [STATE_VIEW], [NFPM])) as UniSwapV4;
+    // nativeIsErc20 stays false for this contract instance: the rest of this suite deliberately
+    // trades native ETH against the real, deep native(address(0))/USDC V4 pool (see
+    // NATIVE_USDC_FEE below), which is only reachable when the sentinel maps to V4's own native
+    // slot. The aliased (nativeIsErc20=true) behavior is covered by its own contract instance in
+    // the 'native <-> USDC alias (nativeIsErc20)' section below.
+    uniSwapV4 = (await factory.deploy(
+      admin.address,
+      [UNIVERSAL_ROUTER],
+      [STATE_VIEW],
+      [NFPM],
+      USDC_ADDRESS,
+      false
+    )) as UniSwapV4;
     await uniSwapV4.deployed();
     await uniSwapV4.updateProxyContract(admin.address);
 
@@ -279,6 +291,75 @@ describe('UniSwapV4 — unit tests (Arc mainnet fork)', async () => {
       console.log(`  Received: ${received} cirBTC (raw)`);
     });
 
+    it('swaps cirBTC -> USDC -> native (2 hops) and delivers native to recipient', async () => {
+      // Acquire cirBTC first by swapping native -> USDC -> cirBTC (mirrors the test above)
+      const toCirbtcPath = [nativeTokenAddress, USDC_ADDRESS, cirBTC_ADDRESS];
+      const toCirbtcArgs = buildExtraArgs(
+        toCirbtcPath,
+        [NATIVE_USDC_FEE, USDC_CIRBTC_FEE],
+        [NATIVE_USDC_TICK_SPACING, USDC_CIRBTC_TICK_SPACING]
+      );
+      const cirbtcQuote = await uniSwapV4.getExpectedReturn({
+        srcAmount: smallEthAmountIn,
+        tradePath: toCirbtcPath,
+        feeBps: 0,
+        extraArgs: toCirbtcArgs,
+      });
+      await uniSwapV4.swap(
+        {
+          srcAmount: smallEthAmountIn,
+          minDestAmount: cirbtcQuote.mul(90).div(100),
+          tradePath: toCirbtcPath,
+          recipient: user.address,
+          feeBps: 0,
+          feeReceiver: admin.address,
+          extraArgs: toCirbtcArgs,
+        },
+        {value: smallEthAmountIn}
+      );
+
+      const cirbtcBalance = await cirbtc.balanceOf(user.address);
+      assert(cirbtcBalance.gt(0), 'need cirBTC to test the reverse swap');
+
+      // UniSwapV4 pulls its ERC20 input from its own balance (see swap(): safeTransfer to the
+      // router), so the caller must fund it first - mirrors what SmartWalletImplementation does
+      await cirbtc.connect(user).transfer(uniSwapV4.address, cirbtcBalance);
+
+      // a fresh address, isolated from any signer paying gas in this test, so its balance delta
+      // reflects only the swap's native output
+      const recipient = ethers.Wallet.createRandom().address;
+
+      const toNativePath = [cirBTC_ADDRESS, USDC_ADDRESS, nativeTokenAddress];
+      const toNativeArgs = buildExtraArgs(
+        toNativePath,
+        [USDC_CIRBTC_FEE, NATIVE_USDC_FEE],
+        [USDC_CIRBTC_TICK_SPACING, NATIVE_USDC_TICK_SPACING]
+      );
+      const nativeQuote = await uniSwapV4.getExpectedReturn({
+        srcAmount: cirbtcBalance,
+        tradePath: toNativePath,
+        feeBps: 0,
+        extraArgs: toNativeArgs,
+      });
+      const minDestAmount = nativeQuote.mul(90).div(100); // thin pool: allow more slippage
+
+      const nativeBefore = await ethers.provider.getBalance(recipient);
+
+      await uniSwapV4.swap({
+        srcAmount: cirbtcBalance,
+        minDestAmount,
+        tradePath: toNativePath,
+        recipient,
+        feeBps: 0,
+        feeReceiver: admin.address,
+        extraArgs: toNativeArgs,
+      });
+
+      const received = (await ethers.provider.getBalance(recipient)).sub(nativeBefore);
+      assert(received.gte(minDestAmount), `received ${received} native < minDestAmount ${minDestAmount}`);
+      console.log(`  Received: ${ethers.utils.formatEther(received)} native (from ${cirbtcBalance} cirBTC raw)`);
+    });
+
     it('reverts when native value is insufficient', async () => {
       const tradePath = [nativeTokenAddress, USDC_ADDRESS];
       const extraArgs = buildExtraArgs(tradePath, NATIVE_USDC_FEE, NATIVE_USDC_TICK_SPACING);
@@ -368,6 +449,99 @@ describe('UniSwapV4 — unit tests (Arc mainnet fork)', async () => {
           extraArgs,
         })
       ).to.be.revertedWith('only swap impl');
+    });
+  });
+});
+
+// ── native <-> USDC alias (nativeIsErc20) ───────────────────────────────────
+// A separate contract instance (rather than a nested describe) so this doesn't share the outer
+// suite's beforeEach(evm_revert(snapshotId)) - that snapshot predates this deployment and would
+// wipe it out.
+//
+// USDC *is* Arc's native token (see the header comment above), so routing native -> USDC through
+// the real, deep native(address(0))/USDC pool - as the rest of this file does - pays a real AMM
+// fee/slippage for what's actually an identity conversion. With nativeIsErc20 true, the native
+// sentinel is instead aliased directly to the USDC ERC20 address (see UniSwapV4.v4Currency), so
+// a trade like native -> cirBTC needs only the single, already-real USDC/cirBTC hop - no
+// native -> USDC leg at all.
+describe('UniSwapV4 — native/USDC alias (Arc mainnet fork)', async () => {
+  let admin: SignerWithAddress;
+  let uniSwapV4Alias: UniSwapV4;
+
+  const smallEthAmountIn = ethers.utils.parseEther('1');
+
+  before(async () => {
+    [admin] = await ethers.getSigners();
+
+    const factory = await ethers.getContractFactory('UniSwapV4');
+    uniSwapV4Alias = (await factory.deploy(
+      admin.address,
+      [UNIVERSAL_ROUTER],
+      [STATE_VIEW],
+      [NFPM],
+      USDC_ADDRESS,
+      true // nativeIsErc20
+    )) as UniSwapV4;
+    await uniSwapV4Alias.deployed();
+    await uniSwapV4Alias.updateProxyContract(admin.address);
+  });
+
+  it('quotes native -> cirBTC directly via the USDC/cirBTC pool, no native -> USDC hop', async () => {
+    const tradePath = [nativeTokenAddress, cirBTC_ADDRESS];
+    // Built against USDC_ADDRESS (not ETH_V4/address(0)): with nativeIsErc20 true, the native
+    // sentinel resolves to the same USDC/cirBTC pool used for a plain USDC -> cirBTC trade.
+    const extraArgs =
+      hexlify(arrayify(UNIVERSAL_ROUTER)) +
+      computePoolId(USDC_ADDRESS, cirBTC_ADDRESS, USDC_CIRBTC_FEE, USDC_CIRBTC_TICK_SPACING).slice(2);
+
+    const destAmount = await uniSwapV4Alias.getExpectedReturn({
+      srcAmount: smallEthAmountIn,
+      tradePath,
+      feeBps: 0,
+      extraArgs,
+    });
+
+    assert(destAmount.gt(0), 'destAmount should be > 0');
+    console.log(
+      `  native -> cirBTC (aliased, 1 hop): ${ethers.utils.formatEther(
+        smallEthAmountIn
+      )} native -> ${destAmount} cirBTC (raw)`
+    );
+  });
+
+  // Skipped for the same reason as uniswapV3Arc.test.ts's fully-skipped 'swap' suite: USDC is
+  // exposed at 0x3600...3600 via a precompile whose transfer()/transferFrom() delegate to another
+  // system contract Hardhat's local EDR fork doesn't implement, so any actual token movement
+  // reverts with "invalid opcode" - an environment limitation, not a contract bug (the quote-only
+  // test above, which never calls transfer, passes). Unskip once Hardhat/EDR supports Arc's
+  // precompiles, or when this is run against a real RPC instead of a local fork.
+  describe.skip('swap', () => {
+    it('swaps native -> cirBTC (1 hop, aliased) and delivers cirBTC to recipient', async () => {
+      const tradePath = [nativeTokenAddress, cirBTC_ADDRESS];
+      const extraArgs =
+        hexlify(arrayify(UNIVERSAL_ROUTER)) +
+        computePoolId(USDC_ADDRESS, cirBTC_ADDRESS, USDC_CIRBTC_FEE, USDC_CIRBTC_TICK_SPACING).slice(2);
+
+      const destAmount = await uniSwapV4Alias.getExpectedReturn({
+        srcAmount: smallEthAmountIn,
+        tradePath,
+        feeBps: 0,
+        extraArgs,
+      });
+      const minDestAmount = destAmount.mul(90).div(100);
+
+      await uniSwapV4Alias.swap(
+        {
+          srcAmount: smallEthAmountIn,
+          minDestAmount,
+          tradePath,
+          recipient: admin.address,
+          feeBps: 0,
+          feeReceiver: admin.address,
+          extraArgs,
+        },
+        {value: smallEthAmountIn}
+      );
     });
   });
 });

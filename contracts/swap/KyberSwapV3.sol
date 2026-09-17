@@ -16,15 +16,35 @@ contract KyberSwapV3 is BaseSwap {
 
     address public router;
 
-    constructor(address _admin, address _router) BaseSwap(_admin) {
+    // Real, liquid address for the native token, traded directly as an ERC20 (instead of
+    // forwarding msg.value) when nativeIsErc20 is true - see BaseSwap.sol for the rationale
+    // (e.g. Arc, where USDC is both the gas token and this address). The off-chain-built
+    // extraArgs calldata is expected to already target wNative as the input token in that case.
+    address public wNative;
+    bool public nativeIsErc20;
+
+    constructor(
+        address _admin,
+        address _router,
+        address _wNative,
+        bool _nativeIsErc20
+    ) BaseSwap(_admin) {
         router = _router;
+        wNative = _wNative;
+        nativeIsErc20 = _nativeIsErc20;
     }
 
     event UpdatedAggregationRouter(address router);
+    event UpdatedNativeIsErc20(bool nativeIsErc20);
 
     function updateAggregationRouter(address _router) external onlyAdmin {
         router = _router;
         emit UpdatedAggregationRouter(router);
+    }
+
+    function updateNativeIsErc20(bool _nativeIsErc20) external onlyAdmin {
+        nativeIsErc20 = _nativeIsErc20;
+        emit UpdatedNativeIsErc20(_nativeIsErc20);
     }
 
     /// @dev get expected return and conversion rate if using a Uni router
@@ -76,17 +96,20 @@ contract KyberSwapV3 is BaseSwap {
         onlyProxyContract
         returns (uint256 destAmount)
     {
-        safeApproveAllowance(address(router), IERC20Ext(params.tradePath[0]));
-
         bytes memory encodedSwapData = params.extraArgs;
 
         uint256 tradeLen = params.tradePath.length;
         IERC20Ext actualSrc = IERC20Ext(params.tradePath[0]);
         IERC20Ext actualDest = IERC20Ext(params.tradePath[tradeLen - 1]);
 
+        bool inputIsNativeErc20 = nativeIsErc20 && actualSrc == ETH_TOKEN_ADDRESS;
+        // the sentinel is tradeable here as the plain ERC20 wNative and needs a real allowance,
+        // unlike a genuine native asset - see BaseSwap.sol for the rationale
+        safeApproveAllowance(address(router), inputIsNativeErc20 ? IERC20Ext(wNative) : actualSrc);
+
         uint256 destBalanceBefore = getBalance(actualDest, params.recipient);
 
-        bool etherIn = IERC20Ext(actualSrc) == ETH_TOKEN_ADDRESS;
+        bool etherIn = actualSrc == ETH_TOKEN_ADDRESS && !inputIsNativeErc20;
         uint256 callValue = etherIn ? params.srcAmount : 0;
 
         (bool success, bytes memory returnDestAmount) = payable(router).call{value: callValue}(

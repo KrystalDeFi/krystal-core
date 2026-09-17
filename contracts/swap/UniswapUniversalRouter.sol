@@ -17,9 +17,22 @@ contract UniswapUniversalRouter is BaseSwap {
     address public swapProxy;
     address public universalRouter;
 
+    // Real, liquid address for the native token, traded directly as an ERC20 through swapProxy
+    // (instead of forwarding msg.value straight to universalRouter) when nativeIsErc20 is true -
+    // see BaseSwap.sol for the rationale (e.g. Arc, where USDC is both the gas token and this
+    // address). The off-chain-built extraArgs calldata is expected to already target wNative as
+    // the input token in that case.
+    address public wNative;
+    bool public nativeIsErc20;
+
     event UpdatedSwapProxy(address swapProxy);
     event UpdatedUniversalRouter(address universalRouter);
+    event UpdatedNativeIsErc20(bool nativeIsErc20);
 
+    // Deliberately left out of the constructor: this contract is deployed via CREATE2 at a fixed
+    // salt (see deployLogic.ts/deployUniswapUniversalRouter test helper), and off-chain-prepared
+    // swap calldata is pinned to that precomputed address - adding constructor args would shift
+    // it. Set post-deployment via updateNativeIsErc20 instead.
     constructor(
         address _admin,
         address _swapProxy,
@@ -37,6 +50,12 @@ contract UniswapUniversalRouter is BaseSwap {
     function updateUniversalRouter(address _universalRouter) external onlyAdmin {
         universalRouter = _universalRouter;
         emit UpdatedUniversalRouter(universalRouter);
+    }
+
+    function updateNativeIsErc20(address _wNative, bool _nativeIsErc20) external onlyAdmin {
+        wNative = _wNative;
+        nativeIsErc20 = _nativeIsErc20;
+        emit UpdatedNativeIsErc20(_nativeIsErc20);
     }
 
     /// @dev get expected return and conversion rate if using a Uni router
@@ -101,12 +120,19 @@ contract UniswapUniversalRouter is BaseSwap {
         IERC20Ext actualDest = IERC20Ext(params.tradePath[params.tradePath.length - 1]);
         uint256 destBalanceBefore = getBalance(actualDest, address(this));
 
-        bool etherIn = IERC20Ext(params.tradePath[0]) == ETH_TOKEN_ADDRESS;
+        bool inputIsNativeErc20 = nativeIsErc20 &&
+            IERC20Ext(params.tradePath[0]) == ETH_TOKEN_ADDRESS;
+        bool etherIn = IERC20Ext(params.tradePath[0]) == ETH_TOKEN_ADDRESS && !inputIsNativeErc20;
         if (etherIn) {
             (bool success, ) = universalRouter.call{value: params.srcAmount}(params.extraArgs);
             require(success, "uniswapUniversalRouter_invalidExtraArgs");
         } else {
-            safeApproveAllowance(swapProxy, IERC20Ext(params.tradePath[0]));
+            // the sentinel is tradeable here as the plain ERC20 wNative and needs a real
+            // allowance, unlike a genuine native asset - see BaseSwap.sol for the rationale
+            safeApproveAllowance(
+                swapProxy,
+                inputIsNativeErc20 ? IERC20Ext(wNative) : IERC20Ext(params.tradePath[0])
+            );
             (bool success, ) = swapProxy.call(params.extraArgs);
             require(success, "uniswapUniversalRouter_invalidExtraArgs");
         }

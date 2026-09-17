@@ -39,7 +39,12 @@ describe('KyberSwapV3', async function () {
     // Prepare to deploy & update swap contract KyberSwap V3
 
     const KyberSwapV3 = await hre.ethers.getContractFactory('KyberSwapV3');
-    const kyberSwapV3 = await KyberSwapV3.deploy(admin.address, kyberRouterAddr);
+    const kyberSwapV3 = await KyberSwapV3.deploy(
+      admin.address,
+      kyberRouterAddr,
+      hre.ethers.constants.AddressZero,
+      false
+    );
 
     // update proxy
     await kyberSwapV3.updateProxyContract(krystalProxyAddr);
