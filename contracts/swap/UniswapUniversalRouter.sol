@@ -10,11 +10,6 @@ contract UniswapUniversalRouter is BaseSwap {
     using SafeERC20 for IERC20Ext;
     using SafeMath for uint256;
 
-    // Arc's native gas token (USDC) has no wrap/unwrap contract: it's exposed at this address
-    // as a plain ERC20 view over the same native balance. A native-input swap here can't send
-    // msg.value like on a real ETH chain — it needs the swapProxy pulling the ERC20 balance instead.
-    address internal constant ARC_NATIVE_TOKEN = 0x3600000000000000000000000000000000000000;
-
     // Constant-address proxy (same address on every chain) used to stage ERC20 inputs into the
     // Universal Router without a signed Permit2 message: it does transferFrom(caller, UR, amount)
     // then calls UR.execute(...). Native ETH inputs bypass it and call the Universal Router directly,
@@ -88,9 +83,9 @@ contract UniswapUniversalRouter is BaseSwap {
     /// @dev swap token
     /// @notice
     /// Uniswap's Trading API (called with x-permit2-disabled) returns the calldata to build this tx.
-    /// That calldata targets `swapProxy`, which pulls the input token via a plain ERC20 allowance
-    /// (no Permit2 signature) and forwards it into the Universal Router. Arc's native token is
-    /// pulled the same way, as the ERC20 view of the balance — there is no msg.value path here.
+    /// For ERC20 inputs, that calldata targets `swapProxy`, which pulls the input token via a plain
+    /// ERC20 allowance (no Permit2 signature) and forwards it into the Universal Router.
+    /// For native ETH inputs, calldata targets `universalRouter` directly, sent with msg.value.
     /// The commands encoded in extraArgs MUST set the swap recipient to this contract's own address
     /// (not MSG_SENDER, which resolves to `swapProxy` inside the router's execution context, not to
     /// us) so we can measure the amount actually received and forward it to params.recipient.
@@ -106,15 +101,15 @@ contract UniswapUniversalRouter is BaseSwap {
         IERC20Ext actualDest = IERC20Ext(params.tradePath[params.tradePath.length - 1]);
         uint256 destBalanceBefore = getBalance(actualDest, address(this));
 
-        // native is held as an ERC20 balance at ARC_NATIVE_TOKEN (same balance, two views), so it
-        // is paid in through the swap proxy by approval, never as msg.value.
         bool etherIn = IERC20Ext(params.tradePath[0]) == ETH_TOKEN_ADDRESS;
-        safeApproveAllowance(
-            swapProxy,
-            IERC20Ext(etherIn ? ARC_NATIVE_TOKEN : params.tradePath[0])
-        );
-        (bool success, ) = swapProxy.call(params.extraArgs);
-        require(success, "uniswapUniversalRouter_invalidExtraArgs");
+        if (etherIn) {
+            (bool success, ) = universalRouter.call{value: params.srcAmount}(params.extraArgs);
+            require(success, "uniswapUniversalRouter_invalidExtraArgs");
+        } else {
+            safeApproveAllowance(swapProxy, IERC20Ext(params.tradePath[0]));
+            (bool success, ) = swapProxy.call(params.extraArgs);
+            require(success, "uniswapUniversalRouter_invalidExtraArgs");
+        }
 
         uint256 returnAmount = getBalance(actualDest, address(this)).sub(destBalanceBefore);
         return safeTransferTo(payable(params.recipient), actualDest, returnAmount);
