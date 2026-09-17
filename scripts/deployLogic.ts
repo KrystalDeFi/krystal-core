@@ -250,8 +250,7 @@ async function deployContracts(
             existingContract?.['swapContracts']?.['uniSwap'],
             undefined,
             contractAdmin,
-            Object.values(networkConfig.uniswap.routers).map((c) => c.address),
-            networkConfig.wNative
+            Object.values(networkConfig.uniswap.routers).map((c) => c.address)
           )) as UniSwap),
       uniSwapV3: !networkConfig.uniswapV3
         ? undefined
@@ -612,6 +611,8 @@ async function deployContract(
 
   // Only verify new contract to save time
   if (autoVerify && isNewDeployment) {
+    // if (autoVerify) {
+
     try {
       log(3, '>> sleep first, wait for contract data to be propagated');
       await sleep(5000);
@@ -802,23 +803,6 @@ async function updateUniSwap(uniSwap: UniSwap | undefined, extraArgs: {from?: st
   let toBeRemoved = existing.filter((add) => !configRouters.includes(add));
   let toBeAdded = configRouters.filter((add) => !existing.includes(add));
   await updateAddressSet(uniSwap.populateTransaction.updateUniRouters, toBeRemoved, toBeAdded, extraArgs);
-
-  log(1, 'update custom selectors');
-  for (const [router, {swapFromEth, swapToEth}] of Object.entries(networkConfig.uniswap.customSelectors ?? {})) {
-    let swapFromEthSelector = ethers.utils.solidityKeccak256(['string'], [swapFromEth]).slice(0, 10);
-    let swapToEthSelector = ethers.utils.solidityKeccak256(['string'], [swapToEth]).slice(0, 10);
-
-    let selector1 = await uniSwap.customSwapFromEth(router);
-    let selector2 = await uniSwap.customSwapToEth(router);
-
-    if (!equalHex(selector1, swapFromEthSelector) || !equalHex(selector2, swapToEthSelector)) {
-      const tx = await executeTxnOnBehalfOf(
-        await uniSwap.populateTransaction.updateCustomSwapSelector(router, swapFromEthSelector, swapToEthSelector)
-      );
-      log(2, '> Updating selectors:', router, swapFromEthSelector, swapToEthSelector);
-      await printInfo(tx);
-    }
-  }
 }
 
 async function updateUniSwapV3(uniSwapV3: UniSwapV3 | undefined, extraArgs: {from?: string}) {

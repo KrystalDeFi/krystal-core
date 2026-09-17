@@ -19,22 +19,21 @@ contract UniSwap is BaseSwap {
     using EnumerableSet for EnumerableSet.AddressSet;
     using BytesLib for bytes;
 
+    // Arc's native gas token (USDC) has no wrap/unwrap contract: it's exposed at this address
+    // as a plain ERC20 view over the same native balance (18-decimal native, 6-decimal ERC20).
+    // Swaps into/out of it must go through the plain token<->token router functions with
+    // converted decimals, instead of the ETH-specific functions that rely on WETH's deposit()/withdraw().
+    address internal constant ARC_NATIVE_TOKEN = 0x3600000000000000000000000000000000000000;
+    uint256 internal constant ARC_NATIVE_DECIMALS_DIVISOR = 1e12;
+
     EnumerableSet.AddressSet private uniRouters;
-    address public wEth;
-    mapping(address => bytes4) public customSwapFromEth;
-    mapping(address => bytes4) public customSwapToEth;
 
     event UpdatedUniRouters(IUniswapV2Router02[] routers, bool isSupported);
 
-    constructor(
-        address _admin,
-        IUniswapV2Router02[] memory routers,
-        address _weth
-    ) BaseSwap(_admin) {
+    constructor(address _admin, IUniswapV2Router02[] memory routers) BaseSwap(_admin) {
         for (uint256 i = 0; i < routers.length; i++) {
             uniRouters.add(address(routers[i]));
         }
-        wEth = _weth;
     }
 
     function getAllUniRouters() external view returns (address[] memory addresses) {
@@ -43,15 +42,6 @@ contract UniSwap is BaseSwap {
         for (uint256 i = 0; i < length; i++) {
             addresses[i] = uniRouters.at(i);
         }
-    }
-
-    function updateCustomSwapSelector(
-        address _router,
-        bytes4 _swapFromEth,
-        bytes4 _swapToEth
-    ) external onlyAdmin {
-        customSwapFromEth[_router] = _swapFromEth;
-        customSwapToEth[_router] = _swapToEth;
     }
 
     function updateUniRouters(IUniswapV2Router02[] calldata routers, bool isSupported)
@@ -179,79 +169,49 @@ contract UniSwap is BaseSwap {
         require(params.tradePath.length >= 2, "invalid tradePath");
 
         address router = parseExtraArgs(params.extraArgs);
-
-        safeApproveAllowance(router, IERC20Ext(params.tradePath[0]));
-
         uint256 tradeLen = params.tradePath.length;
-        IERC20Ext actualSrc = IERC20Ext(params.tradePath[0]);
         IERC20Ext actualDest = IERC20Ext(params.tradePath[tradeLen - 1]);
 
-        // convert eth/bnb -> weth/wbnb address to trade on Uni
+        // native is held as an ERC20 balance at ARC_NATIVE_TOKEN (same balance, two views), so the
+        // router is paid by approval + transferFrom rather than the usual msg.value.
+        safeApproveAllowance(router, IERC20Ext(safeWrapToken(params.tradePath[0])));
+
         address[] memory convertedTradePath = params.tradePath;
-        if (convertedTradePath[0] == address(ETH_TOKEN_ADDRESS)) {
-            convertedTradePath[0] = wEth;
-        }
-        if (convertedTradePath[tradeLen - 1] == address(ETH_TOKEN_ADDRESS)) {
-            convertedTradePath[tradeLen - 1] = wEth;
-        }
+        convertedTradePath[0] = safeWrapToken(convertedTradePath[0]);
+        convertedTradePath[tradeLen - 1] = safeWrapToken(convertedTradePath[tradeLen - 1]);
 
         uint256 destBalanceBefore = getBalance(actualDest, params.recipient);
 
-        if (actualSrc == ETH_TOKEN_ADDRESS) {
-            // swap eth/bnb -> token
-            if (customSwapFromEth[address(router)] != "") {
-                (bool success, ) = router.call{value: params.srcAmount}(
-                    abi.encodeWithSelector(
-                        customSwapFromEth[address(router)],
-                        params.minDestAmount,
-                        convertedTradePath,
-                        params.recipient,
-                        MAX_AMOUNT
-                    )
-                );
-                require(success, "swapFromEth: failed");
-            } else {
-                IUniswapV2Router02(router).swapExactETHForTokensSupportingFeeOnTransferTokens{
-                    value: params.srcAmount
-                }(params.minDestAmount, convertedTradePath, params.recipient, MAX_AMOUNT);
-            }
-        } else {
-            if (actualDest == ETH_TOKEN_ADDRESS) {
-                // swap token -> eth/bnb
-                if (customSwapToEth[address(router)] != "") {
-                    (bool success, ) = router.call(
-                        abi.encodeWithSelector(
-                            customSwapToEth[address(router)],
-                            params.srcAmount,
-                            params.minDestAmount,
-                            convertedTradePath,
-                            params.recipient,
-                            MAX_AMOUNT
-                        )
-                    );
-                    require(success, "swapToEth: failed");
-                } else {
-                    IUniswapV2Router02(router).swapExactTokensForETHSupportingFeeOnTransferTokens(
-                        params.srcAmount,
-                        params.minDestAmount,
-                        convertedTradePath,
-                        params.recipient,
-                        MAX_AMOUNT
-                    );
-                }
-            } else {
-                // swap token -> token
-                IUniswapV2Router02(router).swapExactTokensForTokensSupportingFeeOnTransferTokens(
-                    params.srcAmount,
-                    params.minDestAmount,
-                    convertedTradePath,
-                    params.recipient,
-                    MAX_AMOUNT
-                );
-            }
-        }
+        _executeSwap(router, params, convertedTradePath);
 
         destAmount = getBalance(actualDest, params.recipient).sub(destBalanceBefore);
+    }
+
+    function safeWrapToken(address token) internal pure returns (address) {
+        return token == address(ETH_TOKEN_ADDRESS) ? ARC_NATIVE_TOKEN : token;
+    }
+
+    /// @dev Arc has no ETH-specific router entrypoint to use: swapExactETHForTokens and friends
+    /// wrap through WETH's deposit()/withdraw(), which the native predeploy does not implement.
+    /// Native trades as a plain ERC20 instead, so only its amounts need converting to 6 decimals.
+    function _executeSwap(
+        address router,
+        SwapParams calldata params,
+        address[] memory convertedTradePath
+    ) private {
+        bool srcIsNative = params.tradePath[0] == address(ETH_TOKEN_ADDRESS);
+        bool destIsNative = params.tradePath[params.tradePath.length - 1] ==
+            address(ETH_TOKEN_ADDRESS);
+
+        IUniswapV2Router02(router).swapExactTokensForTokensSupportingFeeOnTransferTokens(
+            srcIsNative ? params.srcAmount / ARC_NATIVE_DECIMALS_DIVISOR : params.srcAmount,
+            destIsNative
+                ? params.minDestAmount / ARC_NATIVE_DECIMALS_DIVISOR
+                : params.minDestAmount,
+            convertedTradePath,
+            params.recipient,
+            MAX_AMOUNT
+        );
     }
 
     /// @param extraArgs expecting <[20B] address router>

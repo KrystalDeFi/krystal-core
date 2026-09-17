@@ -77,6 +77,15 @@ contract ProjectXV3 is BaseSwap {
     using LowGasSafeMath for int256;
     using TickBitmapHyperEvm for IUniswapV3Pool;
 
+    // Arc's native gas token (USDC) has no wrap/unwrap contract: it's exposed at this address
+    // as a plain ERC20 view over the same native balance (18-decimal native, 6-decimal ERC20).
+    // Swaps into/out of it must convert decimals directly instead of calling deposit()/withdraw()
+    // or unwrapWETH9(), none of which exist on this predeploy.
+    // Arc routers still report a WETH9() of their own, pointing at a stub that reverts on every
+    // call, so native is always the predeploy below, never whatever the router names.
+    address internal constant ARC_NATIVE_TOKEN = 0x3600000000000000000000000000000000000000;
+    uint256 internal constant ARC_NATIVE_DECIMALS_DIVISOR = 1e12;
+
     EnumerableSet.AddressSet private uniRouters;
 
     event UpdatedUniRouters(ISwapRouterHyperEvmInternal[] routers, bool isSupported);
@@ -257,7 +266,9 @@ contract ProjectXV3 is BaseSwap {
             params.extraArgs
         );
 
-        safeApproveAllowance(address(router), IERC20Ext(params.tradePath[0]));
+        // native is held as an ERC20 balance at ARC_NATIVE_TOKEN (same balance, two views), so the
+        // router is paid by approval + transferFrom rather than the usual msg.value.
+        safeApproveAllowance(address(router), IERC20Ext(safeWrapToken(params.tradePath[0])));
 
         destAmount = getBalance(
             IERC20Ext(params.tradePath[params.tradePath.length - 1]),
@@ -298,40 +309,24 @@ contract ProjectXV3 is BaseSwap {
         uint24[] memory fees,
         address recipient
     ) internal {
-        bytes memory path = abi.encodePacked(safeWrapToken(tradePath[0], router.WETH9()));
+        bool srcIsNative = tradePath[0] == address(ETH_TOKEN_ADDRESS);
+        bool destIsNative = tradePath[tradePath.length - 1] == address(ETH_TOKEN_ADDRESS);
+
+        bytes memory path = abi.encodePacked(safeWrapToken(tradePath[0]));
         for (uint256 i = 0; i < fees.length; i++) {
-            path = abi.encodePacked(
-                path,
-                fees[i],
-                safeWrapToken(tradePath[i + 1], router.WETH9())
-            );
+            path = abi.encodePacked(path, fees[i], safeWrapToken(tradePath[i + 1]));
         }
         ISwapRouter.ExactInputParams memory swapData = ISwapRouter.ExactInputParams({
             path: path,
             recipient: recipient,
             deadline: MAX_AMOUNT,
-            amountIn: srcAmount,
-            amountOutMinimum: minDestAmount
+            amountIn: srcIsNative ? srcAmount / ARC_NATIVE_DECIMALS_DIVISOR : srcAmount,
+            amountOutMinimum: destIsNative
+                ? minDestAmount / ARC_NATIVE_DECIMALS_DIVISOR
+                : minDestAmount
         });
 
-        if (tradePath[tradePath.length - 1] == address(ETH_TOKEN_ADDRESS)) {
-            swapData.recipient = address(0);
-            bytes[] memory multicallData = new bytes[](2);
-            multicallData[0] = abi.encodeWithSelector(
-                0xc04b8d59, // exactInput
-                swapData
-            );
-            multicallData[1] = abi.encodeWithSelector(
-                0x49404b7c, // unwrapWETH9
-                minDestAmount,
-                recipient
-            );
-            router.multicall(multicallData);
-        } else {
-            router.exactInput{value: tradePath[0] == address(ETH_TOKEN_ADDRESS) ? srcAmount : 0}(
-                swapData
-            );
-        }
+        router.exactInput(swapData);
     }
 
     function swapExactInputSingle(
@@ -342,35 +337,23 @@ contract ProjectXV3 is BaseSwap {
         uint24[] memory fees,
         address recipient
     ) internal {
+        bool srcIsNative = tradePath[0] == address(ETH_TOKEN_ADDRESS);
+        bool destIsNative = tradePath[tradePath.length - 1] == address(ETH_TOKEN_ADDRESS);
+
         ISwapRouter.ExactInputSingleParams memory swapData = ISwapRouter.ExactInputSingleParams({
-            tokenIn: safeWrapToken(tradePath[0], router.WETH9()),
-            tokenOut: safeWrapToken(tradePath[1], router.WETH9()),
+            tokenIn: safeWrapToken(tradePath[0]),
+            tokenOut: safeWrapToken(tradePath[1]),
             fee: fees[0],
             recipient: recipient,
             deadline: MAX_AMOUNT,
-            amountIn: srcAmount,
-            amountOutMinimum: minDestAmount,
+            amountIn: srcIsNative ? srcAmount / ARC_NATIVE_DECIMALS_DIVISOR : srcAmount,
+            amountOutMinimum: destIsNative
+                ? minDestAmount / ARC_NATIVE_DECIMALS_DIVISOR
+                : minDestAmount,
             sqrtPriceLimitX96: 0
         });
 
-        if (tradePath[tradePath.length - 1] == address(ETH_TOKEN_ADDRESS)) {
-            swapData.recipient = address(0);
-            bytes[] memory multicallData = new bytes[](2);
-            multicallData[0] = abi.encodeWithSelector(
-                0x414bf389, // exactInputSingle
-                swapData
-            );
-            multicallData[1] = abi.encodeWithSelector(
-                0x49404b7c, // unwrapWETH9
-                minDestAmount,
-                recipient
-            );
-            router.multicall(multicallData);
-        } else {
-            router.exactInputSingle{
-                value: tradePath[0] == address(ETH_TOKEN_ADDRESS) ? srcAmount : 0
-            }(swapData);
-        }
+        router.exactInputSingle(swapData);
     }
 
     /// @param extraArgs expecting <[20B] address router><[3B] uint24 poolFee1><[3B] uint24 poolFee2>...
@@ -523,7 +506,7 @@ contract ProjectXV3 is BaseSwap {
         quoteOut = quoteOut.mul(sqrtPriceX96) >> 96;
     }
 
-    function safeWrapToken(address token, address wrappedToken) internal pure returns (address) {
-        return token == address(ETH_TOKEN_ADDRESS) ? wrappedToken : token;
+    function safeWrapToken(address token) internal pure returns (address) {
+        return token == address(ETH_TOKEN_ADDRESS) ? ARC_NATIVE_TOKEN : token;
     }
 }
