@@ -81,6 +81,8 @@ contract UniSwapV3Bsc is BaseSwap {
     // as a plain ERC20 view over the same native balance (18-decimal native, 6-decimal ERC20).
     // Swaps into/out of it must convert decimals directly instead of calling deposit()/withdraw()
     // or unwrapWETH9(), none of which exist on this predeploy.
+    // Arc routers still report a WETH9() of their own, pointing at a stub that reverts on every
+    // call, so native is always the predeploy below, never whatever the router names.
     address internal constant ARC_NATIVE_TOKEN = 0x3600000000000000000000000000000000000000;
     uint256 internal constant ARC_NATIVE_DECIMALS_DIVISOR = 1e12;
 
@@ -282,10 +284,9 @@ contract UniSwapV3Bsc is BaseSwap {
             params.extraArgs
         );
 
-        safeApproveAllowance(
-            address(router),
-            IERC20Ext(nativeApprovalToken(router, params.tradePath[0]))
-        );
+        // native is held as an ERC20 balance at ARC_NATIVE_TOKEN (same balance, two views), so the
+        // router is paid by approval + transferFrom rather than the usual msg.value.
+        safeApproveAllowance(address(router), IERC20Ext(safeWrapToken(params.tradePath[0])));
 
         destAmount = getBalance(
             IERC20Ext(params.tradePath[params.tradePath.length - 1]),
@@ -327,42 +328,23 @@ contract UniSwapV3Bsc is BaseSwap {
         uint24[] memory fees,
         address recipient
     ) internal {
-        address wrappedNative = router.WETH9();
-        bool isArcNative = wrappedNative == ARC_NATIVE_TOKEN;
         bool srcIsNative = tradePath[0] == address(ETH_TOKEN_ADDRESS);
         bool destIsNative = tradePath[tradePath.length - 1] == address(ETH_TOKEN_ADDRESS);
 
-        bytes memory path = abi.encodePacked(safeWrapToken(tradePath[0], wrappedNative));
+        bytes memory path = abi.encodePacked(safeWrapToken(tradePath[0]));
         for (uint256 i = 0; i < fees.length; i++) {
-            path = abi.encodePacked(path, fees[i], safeWrapToken(tradePath[i + 1], wrappedNative));
+            path = abi.encodePacked(path, fees[i], safeWrapToken(tradePath[i + 1]));
         }
         ISwapRouterBsc.ExactInputParams memory swapData = ISwapRouterBsc.ExactInputParams({
             path: path,
             recipient: recipient,
-            amountIn: (isArcNative && srcIsNative)
-                ? srcAmount / ARC_NATIVE_DECIMALS_DIVISOR
-                : srcAmount,
-            amountOutMinimum: (isArcNative && destIsNative)
+            amountIn: srcIsNative ? srcAmount / ARC_NATIVE_DECIMALS_DIVISOR : srcAmount,
+            amountOutMinimum: destIsNative
                 ? minDestAmount / ARC_NATIVE_DECIMALS_DIVISOR
                 : minDestAmount
         });
 
-        if (destIsNative && !isArcNative) {
-            swapData.recipient = address(2); // constant Constants.ADDRESS_THIS in UniswapV3 's SwapRouter02
-            bytes[] memory multicallData = new bytes[](2);
-            multicallData[0] = abi.encodeWithSelector(
-                0xb858183f, // exactInput
-                swapData
-            );
-            multicallData[1] = abi.encodeWithSelector(
-                0x49404b7c, // unwrapWETH9
-                minDestAmount,
-                recipient
-            );
-            router.multicall(multicallData);
-        } else {
-            router.exactInput{value: (srcIsNative && !isArcNative) ? srcAmount : 0}(swapData);
-        }
+        router.exactInput(swapData);
     }
 
     function swapExactInputSingle(
@@ -373,44 +355,23 @@ contract UniSwapV3Bsc is BaseSwap {
         uint24[] memory fees,
         address recipient
     ) internal {
-        address wrappedNative = router.WETH9();
-        bool isArcNative = wrappedNative == ARC_NATIVE_TOKEN;
         bool srcIsNative = tradePath[0] == address(ETH_TOKEN_ADDRESS);
         bool destIsNative = tradePath[tradePath.length - 1] == address(ETH_TOKEN_ADDRESS);
 
         ISwapRouterBsc.ExactInputSingleParams memory swapData = ISwapRouterBsc
         .ExactInputSingleParams({
-            tokenIn: safeWrapToken(tradePath[0], wrappedNative),
-            tokenOut: safeWrapToken(tradePath[1], wrappedNative),
+            tokenIn: safeWrapToken(tradePath[0]),
+            tokenOut: safeWrapToken(tradePath[1]),
             fee: fees[0],
             recipient: recipient,
-            amountIn: (isArcNative && srcIsNative)
-                ? srcAmount / ARC_NATIVE_DECIMALS_DIVISOR
-                : srcAmount,
-            amountOutMinimum: (isArcNative && destIsNative)
+            amountIn: srcIsNative ? srcAmount / ARC_NATIVE_DECIMALS_DIVISOR : srcAmount,
+            amountOutMinimum: destIsNative
                 ? minDestAmount / ARC_NATIVE_DECIMALS_DIVISOR
                 : minDestAmount,
             sqrtPriceLimitX96: 0
         });
 
-        if (destIsNative && !isArcNative) {
-            swapData.recipient = address(2); // constant Constants.ADDRESS_THIS in UniswapV3 's SwapRouter02
-            bytes[] memory multicallData = new bytes[](2);
-            multicallData[0] = abi.encodeWithSelector(
-                0x04e45aaf, // exactInputSingle
-                swapData
-            );
-            multicallData[1] = abi.encodeWithSelector(
-                0x49404b7c, // unwrapWETH9
-                minDestAmount,
-                recipient
-            );
-            router.multicall(multicallData);
-        } else {
-            router.exactInputSingle{value: (srcIsNative && !isArcNative) ? srcAmount : 0}(
-                swapData
-            );
-        }
+        router.exactInputSingle(swapData);
     }
 
     /// @param extraArgs expecting <[20B] address router><[3B] uint24 poolFee1><[3B] uint24 poolFee2>...
@@ -566,21 +527,7 @@ contract UniSwapV3Bsc is BaseSwap {
         quoteOut = quoteOut.mul(sqrtPriceX96) >> 96;
     }
 
-    function safeWrapToken(address token, address wrappedToken) internal pure returns (address) {
-        return token == address(ETH_TOKEN_ADDRESS) ? wrappedToken : token;
-    }
-
-    /// @dev on Arc, native ETH_TOKEN_ADDRESS is actually held as an ERC20 balance at
-    /// ARC_NATIVE_TOKEN (dual representation of the same native balance), so the router needs
-    /// an ERC20 approval instead of the usual native-value transfer that skips approval.
-    function nativeApprovalToken(ISwapRouterBscInternal router, address token)
-        internal
-        view
-        returns (address)
-    {
-        if (token == address(ETH_TOKEN_ADDRESS) && router.WETH9() == ARC_NATIVE_TOKEN) {
-            return ARC_NATIVE_TOKEN;
-        }
-        return token;
+    function safeWrapToken(address token) internal pure returns (address) {
+        return token == address(ETH_TOKEN_ADDRESS) ? ARC_NATIVE_TOKEN : token;
     }
 }

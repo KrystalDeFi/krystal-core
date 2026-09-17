@@ -14,12 +14,6 @@ contract KyberSwapV3 is BaseSwap {
     using BytesLib for bytes;
     using SafeMath for uint256;
 
-    // Arc's native gas token (USDC) has no wrap/unwrap contract: it's exposed at this address
-    // as a plain ERC20 view over the same native balance. A native-input swap here can't send
-    // msg.value like on a real ETH chain — it needs the router pulling the ERC20 balance instead.
-    uint256 internal constant ARC_CHAIN_ID = 5042;
-    address internal constant ARC_NATIVE_TOKEN = 0x3600000000000000000000000000000000000000;
-
     address public router;
 
     constructor(address _admin, address _router) BaseSwap(_admin) {
@@ -82,22 +76,18 @@ contract KyberSwapV3 is BaseSwap {
         onlyProxyContract
         returns (uint256 destAmount)
     {
-        bool etherIn = IERC20Ext(params.tradePath[0]) == ETH_TOKEN_ADDRESS;
-        bool isArcNative = etherIn && _chainId() == ARC_CHAIN_ID;
-
-        safeApproveAllowance(
-            address(router),
-            IERC20Ext(isArcNative ? ARC_NATIVE_TOKEN : params.tradePath[0])
-        );
+        safeApproveAllowance(address(router), IERC20Ext(params.tradePath[0]));
 
         bytes memory encodedSwapData = params.extraArgs;
 
         uint256 tradeLen = params.tradePath.length;
+        IERC20Ext actualSrc = IERC20Ext(params.tradePath[0]);
         IERC20Ext actualDest = IERC20Ext(params.tradePath[tradeLen - 1]);
 
         uint256 destBalanceBefore = getBalance(actualDest, params.recipient);
 
-        uint256 callValue = (etherIn && !isArcNative) ? params.srcAmount : 0;
+        bool etherIn = IERC20Ext(actualSrc) == ETH_TOKEN_ADDRESS;
+        uint256 callValue = etherIn ? params.srcAmount : 0;
 
         (bool success, bytes memory returnDestAmount) = payable(router).call{value: callValue}(
             encodedSwapData
@@ -105,14 +95,6 @@ contract KyberSwapV3 is BaseSwap {
         require(success, "swapByKyberSwapV3: failed");
 
         destAmount = decodeSwapResponse(returnDestAmount);
-    }
-
-    /// @dev Solidity 0.7.x has no block.chainid; the CHAINID opcode has been available since
-    /// Constantinople.
-    function _chainId() internal pure returns (uint256 id) {
-        assembly {
-            id := chainid()
-        }
     }
 
     function decodeSwapResponse(bytes memory data)

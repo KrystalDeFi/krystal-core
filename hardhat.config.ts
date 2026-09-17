@@ -156,6 +156,14 @@ const config: HardhatUserConfig = {
           browserURL: 'https://robinhoodchain.blockscout.com',
         },
       },
+      {
+        network: 'arc_mainnet',
+        chainId: 5042,
+        urls: {
+          apiURL: 'https://explorer.arc.io/api',
+          browserURL: 'https://explorer.arc.io',
+        },
+      },
     ],
   },
 
