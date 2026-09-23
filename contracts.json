@@ -174,7 +174,8 @@
       "uniswapUniversalRouter": "0x504CbdA67eC55E95AE4202C440B5c49F7d89019f",
       "kyberDmmV2": "0xA3f1bD7beE8c6DAE2De8FcF37067a87706517640",
       "kyberSwapV2": "0x1Af8772AC277FE590a0Bde36da607100221A9622",
-      "kyberSwapV3": "0x0a869fe705ecc3986a4d9a77f305fc1667d18d6b"
+      "kyberSwapV3": "0x0a869fe705ecc3986a4d9a77f305fc1667d18d6b",
+      "uniSwapV4": "0x1b50869e6f1486Bd8b4f937e4b48D1471B84A51B"
     },
     "lendingContracts": {
       "compoundLending": "0x8C27aBf05DE1d4847c3924566C3cBAFec6eFb42A",
