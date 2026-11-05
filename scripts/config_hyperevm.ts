@@ -29,6 +29,11 @@ export const HyperevmConfig: Record<string, IConfig> = {
       testingTokens: ['usdc', 'usdt'],
     },
 
+    okx: {
+      router: '0xb193874f0c77948d2bcfec2efaf8bc65b4c2ca89',
+      okxTokenApprove: '0x56e6983D59bF472Ced0E63966A14d94A3A291589',
+    },
+
     supportedWallets: commonPlatformWallets,
     nativeUsdRate: 55,
 
