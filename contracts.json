@@ -228,7 +228,8 @@
     "swapContracts": {
       "uniSwapV3": "0x87b564188aC87b9C3f6f502C8a35262EcD2dFCB8",
       "kyberSwapV3": "0x1AF3f25F8AE268680Bb8351a8457bBfD63514e11",
-      "projectXV3": "0xECbed753B17f750f3970E13C759B1999B822D6Ea"
+      "projectXV3": "0xECbed753B17f750f3970E13C759B1999B822D6Ea",
+      "okx": "0xB2A1036d731E3B91c52c8d38C510d953fCACba55"
     },
     "lendingContracts": {}
   },
