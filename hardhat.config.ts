@@ -458,7 +458,7 @@ if (PRIVATE_KEY && INFURA_API_KEY) {
     chainId: 1,
     accounts: [PRIVATE_KEY],
     timeout: 20000,
-    gasPrice: 13 * 1e9,
+    gasPrice: 0.33 * 1e9,
   };
 
   config.networks!.sonic_testnet = {
