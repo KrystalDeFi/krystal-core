@@ -81,7 +81,9 @@ const config: HardhatUserConfig = {
   etherscan: {
     // Your API key for bscscan / ethscan
     // Obtain one at https://bscscan.io/
-    apiKey: ETHERSCAN_KEY,
+    // A single string key forces hardhat-verify onto the Etherscan v2 API and ignores customChains apiURL.
+    // Elysium's Blockscout needs the per-network (v1) form; the endpoint needs no key, so this is a placeholder.
+    apiKey: process.env.CHAIN === 'elysium' ? {elysium: 'blockscout'} : ETHERSCAN_KEY,
 
     customChains: [
       {
@@ -154,6 +156,14 @@ const config: HardhatUserConfig = {
         urls: {
           apiURL: 'https://robinhoodchain.blockscout.com/api',
           browserURL: 'https://robinhoodchain.blockscout.com',
+        },
+      },
+      {
+        network: 'elysium',
+        chainId: 99901,
+        urls: {
+          apiURL: 'https://elysium.kinetiq.xyz/api/verify',
+          browserURL: 'https://elysium.kinetiq.xyz',
         },
       },
     ],
@@ -402,6 +412,14 @@ if (PRIVATE_KEY) {
     accounts: [PRIVATE_KEY],
     timeout: 20000,
     gasPrice: 20 * 1e9,
+  };
+
+  config.networks!.elysium_mainnet = {
+    url: 'https://rpc-node-lb.krystal.app/?chain_id=99901',
+    chainId: 99901,
+    accounts: [PRIVATE_KEY],
+    timeout: 60000,
+    gasPrice: 0.6 * 1e9,
   };
 }
 

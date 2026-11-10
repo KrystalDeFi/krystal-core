@@ -18,6 +18,7 @@ import {UnichainConfig} from './config_unichain';
 import {HyperevmConfig} from './config_hyperevm';
 import {RobinhoodConfig} from './config_robinhood';
 import {ArcConfig} from './config_arc';
+import {ElysiumConfig} from './config_elysium';
 
 const NetworkConfig: Record<string, IConfig> = {
   ...BscConfig,
@@ -38,6 +39,7 @@ const NetworkConfig: Record<string, IConfig> = {
   ...HyperevmConfig,
   ...RobinhoodConfig,
   ...ArcConfig,
+  ...ElysiumConfig,
 };
 
 NetworkConfig.hardhat = {
