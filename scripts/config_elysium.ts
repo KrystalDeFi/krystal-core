@@ -27,6 +27,17 @@ export const ElysiumConfig: Record<string, IConfig> = {
       universalRouter: '0x1B341FDD55d56F8E08409A2C25DDFad93Eb03C1a',
     },
 
+    uniswapV4: {
+      routers: [
+        {
+          router: '0xA13f7611115752DEB2B13813BDDE16A5073e4b45',
+          stateView: '0x27eD73aE0652fdCf71d6793412A7525f32bE9dfE',
+          nfpm: '0x1d1C51b9d07fD27d36412A2b66CC23D19Eb3E518',
+        },
+      ],
+      testingTokens: ['usdc', 'cbbtc'],
+    },
+
     supportedWallets: commonPlatformWallets,
     nativeUsdRate: 55,
 
