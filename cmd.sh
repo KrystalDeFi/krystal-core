@@ -1,6 +1,6 @@
 #!/bin/sh
 
-usage="yarn <deploy,test> [-h] [-c <eth,bsc,polygon,avalanche,fantom,cronos,aurora,arbitrum,klaytn,robinhood>] [-n <mainnet,testnet,ropsten,goerli,rinkeby,staging,fuji>] -- to run test on specific chain and network
+usage="yarn <deploy,test> [-h] [-c <eth,bsc,polygon,avalanche,fantom,cronos,aurora,arbitrum,klaytn,robinhood,elysium>] [-n <mainnet,testnet,ropsten,goerli,rinkeby,staging,fuji>] -- to run test on specific chain and network
 
 where:
     -h  show this help text
@@ -20,7 +20,7 @@ while getopts ":hc:n:f:x:" option; do
       exit
       ;;
     c) 
-      if [[ ! "$OPTARG" =~ ^(eth|bsc|polygon|avalanche|fantom|cronos|aurora|arbitrum|klaytn|optimism|linea|base|sonic|berachain|unichain|hyperevm|robinhood|arc)$ ]]; then
+      if [[ ! "$OPTARG" =~ ^(eth|bsc|polygon|avalanche|fantom|cronos|aurora|arbitrum|klaytn|optimism|linea|base|sonic|berachain|unichain|hyperevm|robinhood|arc|elysium)$ ]]; then
           printf "invalid value for -%s\n" "$option" >&2
           echo "$usage" >&2
           exit 1

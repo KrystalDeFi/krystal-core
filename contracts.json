@@ -149,6 +149,16 @@
     },
     "lendingContracts": {}
   },
+  "elysium_mainnet": {
+    "smartWalletImplementation": "0x3150a343e06beB3C4B87f3F83612e1Bc1Fb9b4C6",
+    "smartWalletProxy": "0xbb3E4dFFcfa7079d0720BaB5792FF464259A4637",
+    "swapContracts": {
+      "okx": "0xd74D8891b776C2E2Db82e0E36C745C29658B9054",
+      "uniswapUniversalRouter": "0x224B5024B79508F45B9b6C1941013953Ff4B392e",
+      "uniSwapV4": "0x3E510B79751C75E5AF2Eb8FC4D923ef0CEFd36b0"
+    },
+    "lendingContracts": {}
+  },
   "eth_goerli": {
     "smartWalletImplementation": "0xFa182dF059684cA906C71e1e120F2035a6359Af2",
     "smartWalletProxy": "0xa0Af2A2ABD276843f65B8c117406Da9335F39364",
